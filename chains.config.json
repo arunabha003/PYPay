@@ -1,0 +1,45 @@
+{
+  "chains": [
+    {
+      "name": "Arbitrum Sepolia",
+      "chainId": 421614,
+      "rpcUrlEnv": "ARBITRUM_SEPOLIA_RPC",
+      "pyusdAddressEnv": "PYUSD_ARBSEPOLIA",
+      "permit2AddressEnv": "PERMIT2_ARBSEPOLIA",
+      "entryPointAddressEnv": "ENTRYPOINT_ARBSEPOLIA",
+      "bundlerRpcEnv": "BUNDLER_RPC_ARBSEPOLIA",
+      "explorerUrl": "https://sepolia.arbiscan.io",
+      "contracts": {
+        "merchantRegistryEnv": "REGISTRY_ARBSEPOLIA",
+        "invoiceEnv": "INVOICE_ARBSEPOLIA",
+        "checkoutEnv": "CHECKOUT_ARBSEPOLIA",
+        "paymasterEnv": "PAYMASTER_ARBSEPOLIA",
+        "bridgeEscrowEnv": "BRIDGE_ESCROW_ARBSEPOLIA",
+        "accountFactoryEnv": "ACCOUNT_FACTORY_ARBSEPOLIA"
+      }
+    },
+    {
+      "name": "Ethereum Sepolia",
+      "chainId": 11155111,
+      "rpcUrlEnv": "ETHEREUM_SEPOLIA_RPC",
+      "pyusdAddressEnv": "PYUSD_SEPOLIA",
+      "permit2AddressEnv": "PERMIT2_SEPOLIA",
+      "entryPointAddressEnv": "ENTRYPOINT_SEPOLIA",
+      "bundlerRpcEnv": "BUNDLER_RPC_SEPOLIA",
+      "explorerUrl": "https://sepolia.etherscan.io",
+      "contracts": {
+        "merchantRegistryEnv": "REGISTRY_SEPOLIA",
+        "invoiceEnv": "INVOICE_SEPOLIA",
+        "checkoutEnv": "CHECKOUT_SEPOLIA",
+        "paymasterEnv": "PAYMASTER_SEPOLIA",
+        "bridgeEscrowEnv": "BRIDGE_ESCROW_SEPOLIA",
+        "accountFactoryEnv": "ACCOUNT_FACTORY_SEPOLIA"
+      }
+    }
+  ],
+  "ui": {
+    "appName": "TapKit",
+    "currency": "PYUSD"
+  }
+}
+
