@@ -15,7 +15,7 @@ import {TapKitPaymaster} from "../src/paymaster/TapKitPaymaster.sol";
 /// @notice Deployment script for all PyPay contracts
 /// @dev Reads addresses from environment variables (no hardcoding)
 contract DeployScript is Script {
-    // Read from env
+    // Resolved per-chain configuration
     address PYUSD;
     address PERMIT2;
     address ENTRY_POINT;
@@ -24,24 +24,45 @@ contract DeployScript is Script {
     uint256 MAX_AMOUNT_PER_TX;
 
     function setUp() public {
-        // Load env variables
-        PYUSD = vm.envAddress("PYUSD");
-        PERMIT2 = vm.envAddress("PERMIT2");
-        ENTRY_POINT = vm.envAddress("ENTRY_POINT");
-        DEPLOYER = vm.envAddress("DEPLOYER");
-        PAYMASTER_OWNER = vm.envOr("PAYMASTER_OWNER", DEPLOYER);
-        MAX_AMOUNT_PER_TX = vm.envOr("MAX_AMOUNT_PER_TX", uint256(10000000000)); // 10k PYUSD default
+        // Resolve chain-specific suffix
+        string memory suffix = _chainSuffix();
 
-        // Validate addresses
+        // Compose env var names, e.g., PYUSD_ARBSEPOLIA / PYUSD_SEPOLIA
+        string memory pyusdKey = string.concat("PYUSD_", suffix);
+        string memory permit2Key = string.concat("PERMIT2_", suffix);
+        string memory entryPointKey = string.concat("ENTRYPOINT_", suffix);
+
+        // Load per-chain addresses
+        PYUSD = vm.envAddress(pyusdKey);
+        PERMIT2 = vm.envAddress(permit2Key);
+        ENTRY_POINT = vm.envAddress(entryPointKey);
+
+        // Derive deployer and optional paymaster owner from private keys if present
+        uint256 deployerPk = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        DEPLOYER = vm.addr(deployerPk);
+
+        uint256 ownerPk;
+        // PAYMASTER_OWNER_PRIVATE_KEY is optional; fallback to DEPLOYER
+        try vm.envUint("PAYMASTER_OWNER_PRIVATE_KEY") returns (uint256 v) {
+            ownerPk = v;
+            PAYMASTER_OWNER = vm.addr(ownerPk);
+        } catch {
+            PAYMASTER_OWNER = DEPLOYER;
+        }
+
+        // Limits
+        MAX_AMOUNT_PER_TX = vm.envOr("MAX_AMOUNT_PER_TX", uint256(10_000_000_000)); // 10k PYUSD (6 decimals)
+
+        // Validate
         require(PYUSD != address(0), "PYUSD address not set");
         require(PERMIT2 != address(0), "PERMIT2 address not set");
         require(ENTRY_POINT != address(0), "ENTRY_POINT address not set");
         require(DEPLOYER != address(0), "DEPLOYER address not set");
+        require(PAYMASTER_OWNER != address(0), "PAYMASTER_OWNER invalid");
     }
 
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-
         vm.startBroadcast(deployerPrivateKey);
 
         // Deploy core contracts
@@ -140,6 +161,11 @@ contract DeployScript is Script {
         if (block.chainid == 421614) return "ARBSEPOLIA";
         if (block.chainid == 11155111) return "SEPOLIA";
         return "UNKNOWN";
+    }
+
+    function _chainSuffix() internal view returns (string memory) {
+        // Same as prefix for env var suffixes
+        return _chainPrefix();
     }
 }
 

@@ -8,10 +8,29 @@ import {MerchantRegistry} from "../src/core/MerchantRegistry.sol";
 /// @notice Script to seed test merchant
 contract SeedMerchantScript is Script {
     function run() public {
-        address registryAddress = vm.envAddress("REGISTRY");
-        address merchantAddress = vm.envAddress("TEST_MERCHANT");
-        address payoutAddress = vm.envAddress("TEST_MERCHANT_PAYOUT");
-        uint16 feeBps = uint16(vm.envOr("TEST_MERCHANT_FEE_BPS", uint256(0)));
+        // Resolve chain-specific suffix
+        string memory suffix = _chainSuffix();
+
+        // Prefer chain-suffixed env vars, fallback to generic
+        address registryAddress = _envAddressPref(
+            string.concat("REGISTRY_", suffix),
+            "REGISTRY"
+        );
+        address merchantAddress = _envAddressPref(
+            string.concat("TEST_MERCHANT_", suffix),
+            "TEST_MERCHANT"
+        );
+        address payoutAddress = _envAddressPref(
+            string.concat("TEST_MERCHANT_PAYOUT_", suffix),
+            "TEST_MERCHANT_PAYOUT"
+        );
+        uint16 feeBps = uint16(
+            _envUintPref(
+                string.concat("TEST_MERCHANT_FEE_BPS_", suffix),
+                "TEST_MERCHANT_FEE_BPS",
+                0
+            )
+        );
 
         uint256 ownerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
@@ -29,6 +48,42 @@ contract SeedMerchantScript is Script {
         console2.log("Test merchant registered successfully!");
 
         vm.stopBroadcast();
+    }
+
+    function _chainSuffix() internal view returns (string memory) {
+        if (block.chainid == 421614) return "ARBSEPOLIA";
+        if (block.chainid == 11155111) return "SEPOLIA";
+        return "UNKNOWN";
+    }
+
+    function _envAddressPref(string memory primary, string memory fallbackKey)
+        internal
+        view
+        returns (address)
+    {
+        // Try primary; if missing, try fallback
+        try vm.envAddress(primary) returns (address a) {
+            return a;
+        } catch {
+            return vm.envAddress(fallbackKey);
+        }
+    }
+
+    function _envUintPref(string memory primary, string memory fallbackKey, uint256 defaultValue)
+        internal
+        view
+        returns (uint256)
+    {
+        // Try primary; if missing, try fallback; else default
+        try vm.envUint(primary) returns (uint256 v1) {
+            return v1;
+        } catch {
+            try vm.envUint(fallbackKey) returns (uint256 v2) {
+                return v2;
+            } catch {
+                return defaultValue;
+            }
+        }
     }
 }
 

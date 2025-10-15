@@ -8,8 +8,11 @@ import {TapKitPaymaster} from "../src/paymaster/TapKitPaymaster.sol";
 /// @notice Script to stake paymaster on EntryPoint
 contract StakePaymasterScript is Script {
     function run() public {
-        address paymasterAddress = vm.envAddress("PAYMASTER");
-        uint256 stakeAmount = 0.1 ether;
+        // Resolve chain-specific paymaster env var
+        string memory suffix = _chainSuffix();
+        string memory paymasterKey = string.concat("PAYMASTER_", suffix);
+        address paymasterAddress = vm.envAddress(paymasterKey);
+        uint256 stakeAmount = 1 ether;
         try vm.envUint("STAKE_AMOUNT") returns (uint256 amount) {
             stakeAmount = amount;
         } catch {
@@ -38,6 +41,12 @@ contract StakePaymasterScript is Script {
         console2.log("Paymaster staked successfully!");
 
         vm.stopBroadcast();
+    }
+
+    function _chainSuffix() internal view returns (string memory) {
+        if (block.chainid == 421614) return "ARBSEPOLIA";
+        if (block.chainid == 11155111) return "SEPOLIA";
+        return "UNKNOWN";
     }
 }
 
