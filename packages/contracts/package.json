@@ -1,0 +1,14 @@
+{
+  "name": "@pypay/contracts",
+  "version": "1.0.0",
+  "description": "PyPay smart contracts - Account Abstraction and payment processing",
+  "scripts": {
+    "build": "forge build",
+    "test": "forge test",
+    "test:fork": "forge test --fork-url $ARBITRUM_SEPOLIA_RPC",
+    "deploy:arb": "forge script script/Deploy.s.sol:DeployScript --rpc-url $ARBITRUM_SEPOLIA_RPC --broadcast",
+    "deploy:eth": "forge script script/Deploy.s.sol:DeployScript --rpc-url $ETHEREUM_SEPOLIA_RPC --broadcast",
+    "clean": "forge clean"
+  }
+}
+

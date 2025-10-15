@@ -1,0 +1,31 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.27"
+evm_version = "cancun"
+
+optimizer = true
+optimizer_runs = 9_999_999
+
+remappings = [
+  "@solady/=lib/solady/",
+  "@forge-std/=lib/forge-std/src/",
+  "@openzeppelin/=lib/openzeppelin-contracts/"
+]
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = false
+
+[rpc_endpoints]
+arbitrum_sepolia = "${ARBITRUM_SEPOLIA_RPC}"
+ethereum_sepolia = "${ETHEREUM_SEPOLIA_RPC}"
+
+[etherscan]
+# Etherscan verification disabled by default for local and test deploys
+# Uncomment and set keys to enable on-demand verification
+# arbitrum_sepolia = {key = "${ARBISCAN_API_KEY}", url = "https://api-sepolia.arbiscan.io/api"}
+# sepolia = {key = "${ETHERSCAN_API_KEY}", url = "https://api-sepolia.etherscan.io/api"}
+
