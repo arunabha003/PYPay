@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // Direct connection for migrations
+}
+
+model Merchant {
+  address       String
+  payoutAddress String
+  feeBps        Int
+  active        Boolean
+  chainId       Int
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  invoices      Invoice[]
+
+  @@id([address, chainId])
+  @@index([chainId])
+  @@index([active])
+}
+
+model Invoice {
+  id          String    @id
+  merchant    String
+  amount      String
+  chainId     Int
+  expiry      Int
+  memoHash    String
+  status      String    // unpaid, paid, cancelled
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  txHash      String?
+  blockNumber Int?
+  receipts    Receipt[]
+  merchantRel Merchant  @relation(fields: [merchant, chainId], references: [address, chainId])
+
+  @@index([merchant, chainId])
+  @@index([status])
+  @@index([chainId])
+}
+
+model Receipt {
+  id          String   @id
+  invoiceId   String
+  payer       String
+  merchant    String
+  amount      String
+  chainId     Int
+  txHash      String
+  blockTime   Int
+  blockNumber Int
+  createdAt   DateTime @default(now())
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+
+  @@index([merchant, chainId])
+  @@index([payer])
+  @@index([txHash])
+}
+
+model Bridge {
+  ref           String   @id
+  srcChainId    Int
+  dstChainId    Int
+  payer         String
+  amount        String
+  status        String   // pending, locked, released, failed
+  lockTxHash    String?
+  releaseTxHash String?
+  lockedAt      DateTime?
+  releasedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([payer])
+  @@index([status])
+  @@index([srcChainId, dstChainId])
+}
+
+model CostQuote {
+  chainId           Int      @id
+  chainName         String
+  gasSponsorCostUsd Float
+  estLatencyMs      Int
+  bridgeCostUsd     Float
+  totalCostUsd      Float
+  updatedAt         DateTime @default(now())
+}
+
+model User {
+  id                  String   @id
+  passkeyCredentialId String   @unique
+  smartAccountAddress String
+  owner               String
+  guardian            String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([smartAccountAddress])
+}
+
+model SessionKey {
+  pubKeyHash String   @id
+  account    String
+  validUntil Int
+  policyId   Int
+  active     Boolean
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([account])
+  @@index([active])
+}
+
