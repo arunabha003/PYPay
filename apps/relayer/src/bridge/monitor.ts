@@ -10,13 +10,17 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-const RELAYER_PRIVATE_KEY = process.env.RELAYER_PRIVATE_KEY as `0x${string}`;
-
 export async function initializeBridgeMonitor(
   chains: ChainConfig[],
   prisma: PrismaClient,
   logger: Logger
 ) {
+  const RELAYER_PRIVATE_KEY = process.env.RELAYER_PRIVATE_KEY as `0x${string}`;
+  
+  if (!RELAYER_PRIVATE_KEY) {
+    throw new Error('RELAYER_PRIVATE_KEY environment variable is required');
+  }
+  
   const relayerAccount = privateKeyToAccount(RELAYER_PRIVATE_KEY);
 
   for (const chain of chains) {

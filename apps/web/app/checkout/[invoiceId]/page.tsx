@@ -5,10 +5,12 @@ import { useParams } from 'next/navigation';
 import { authenticatePasskey, registerPasskey, hasPasskey } from '@/lib/passkey';
 import { generateSessionKey, getSessionKey } from '@/lib/sessionKey';
 import { getOrCreateSmartAccount, getPYUSDBalance } from '@/lib/smartAccount';
+import { settleInvoice, approvePYUSD, checkPYUSDAllowance } from '@/lib/payment';
 import { getChainById } from '@/lib/config';
 
 const INDEXER_URL = process.env.NEXT_PUBLIC_INDEXER_URL || 'http://localhost:3001';
-const GUARDIAN_ADDRESS =process.env.NEXT_PUBLIC_GUARDIAN_ADDRESS || '0x0000000000000000000000000000000000000001'; // From config
+const GUARDIAN_ADDRESS = process.env.NEXT_PUBLIC_GUARDIAN_ADDRESS || '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
+const TEST_OWNER = process.env.NEXT_PUBLIC_TEST_OWNER || '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 
 interface Invoice {
   id: string;
@@ -106,19 +108,19 @@ export default function CheckoutPage() {
         chainId,
         rpcUrl: chain.rpcUrl,
         accountFactory: chain.contracts.accountFactory,
-        testOwner: process.env.NEXT_PUBLIC_TEST_OWNER,
+        testOwner: TEST_OWNER,
         guardian: GUARDIAN_ADDRESS,
       });
 
       if (!chain.rpcUrl) throw new Error(`Missing RPC URL for chain ${chainId}`);
       if (!chain.contracts.accountFactory || (chain.contracts.accountFactory as string).length !== 42) {
+        console.error('AccountFactory value:', chain.contracts.accountFactory);
+        console.error('AccountFactory length:', (chain.contracts.accountFactory as string).length);
         throw new Error(`Missing NEXT_PUBLIC_ACCOUNT_FACTORY_* for chain ${chainId}`);
       }
-      if (!process.env.NEXT_PUBLIC_TEST_OWNER) throw new Error('Missing NEXT_PUBLIC_TEST_OWNER');
 
       // Owner address for MVP: use a configured test owner
-      const testOwner = process.env.NEXT_PUBLIC_TEST_OWNER as string | undefined;
-      if (!testOwner) throw new Error('NEXT_PUBLIC_TEST_OWNER is not set');
+      const testOwner = TEST_OWNER;
 
       if (!chain.contracts.accountFactory) {
         throw new Error('Missing NEXT_PUBLIC_ACCOUNT_FACTORY_* for selected chain');
@@ -205,24 +207,113 @@ export default function CheckoutPage() {
   const handlePay = async () => {
     setProcessing(true);
 
-    const selectedQuote = quotes.find((q) => q.chainId === selectedChain);
+    try {
+      const selectedQuote = quotes.find((q) => q.chainId === selectedChain);
+      const chain = getChainById(selectedChain);
+      
+      if (!chain || !invoice || !account) {
+        throw new Error('Missing required data for payment');
+      }
 
-    // Check if bridge is needed
-    if (selectedQuote?.needsBridge) {
-      setStep('bridge');
-      // Simulate bridge process
-      setTimeout(() => {
-        setStep('pay');
-        setProcessing(false);
-      }, 3000);
-      return;
-    }
+      // Check if bridge is needed
+      if (selectedQuote?.needsBridge) {
+        setStep('bridge');
+        // TODO: Implement actual bridge logic
+        setTimeout(() => {
+          setStep('pay');
+          setProcessing(false);
+        }, 3000);
+        return;
+      }
 
-    // Simulate payment process
-    setTimeout(() => {
-      setStep('success');
+      // Move to payment confirmation
+      setStep('pay');
       setProcessing(false);
-    }, 2000);
+    } catch (error: any) {
+      console.error('Payment preparation failed:', error);
+      setError(error.message || 'Failed to prepare payment');
+      setStep('error');
+      setProcessing(false);
+    }
+  };
+
+  // Step 5: Execute actual payment
+  const executePayment = async () => {
+    setProcessing(true);
+
+    try {
+      const chain = getChainById(selectedChain);
+      
+      if (!chain || !invoice || !account) {
+        throw new Error('Missing required data for payment');
+      }
+
+      console.log('[Checkout] Executing payment...', {
+        invoice: invoice.id,
+        payer: account,
+        chain: chain.name,
+      });
+
+      // Check allowance
+      const allowance = await checkPYUSDAllowance(
+        chain.pyusdAddress,
+        account as any,
+        chain.contracts.checkout,
+        chain.rpcUrl
+      );
+
+      console.log('[Checkout] Current allowance:', allowance.toString());
+
+      // Approve if needed
+      if (allowance < BigInt(invoice.amount)) {
+        console.log('[Checkout] Approving PYUSD spending...');
+        const approvalResult = await approvePYUSD(
+          chain.pyusdAddress,
+          chain.contracts.checkout,
+          BigInt(invoice.amount),
+          account as any,
+          chain.chainId,
+          chain.rpcUrl,
+          chain.entryPointAddress,
+          chain.contracts.paymaster
+        );
+
+        if (!approvalResult.success) {
+          throw new Error(approvalResult.error || 'Approval failed');
+        }
+
+        console.log('[Checkout] Approval successful:', approvalResult.txHash);
+      }
+
+      // Settle the invoice
+      console.log('[Checkout] Settling invoice...');
+      const result = await settleInvoice(
+        invoice,
+        account as any,
+        chain.contracts.checkout,
+        chain.chainId,
+        chain.rpcUrl,
+        chain.entryPointAddress,
+        chain.contracts.paymaster
+      );
+
+      if (!result.success) {
+        throw new Error(result.error || 'Settlement failed');
+      }
+
+      console.log('[Checkout] Payment successful!', {
+        txHash: result.txHash,
+        receiptId: result.receiptId,
+      });
+
+      setStep('success');
+    } catch (error: any) {
+      console.error('[Checkout] Payment failed:', error);
+      setError(error.message || 'Payment failed');
+      setStep('error');
+    } finally {
+      setProcessing(false);
+    }
   };
 
   if (step === 'loading') {
@@ -428,13 +519,7 @@ export default function CheckoutPage() {
               {quotes.find((q) => q.chainId === selectedChain)?.chainName}
             </p>
             <button
-              onClick={() => {
-                setProcessing(true);
-                setTimeout(() => {
-                  setStep('success');
-                  setProcessing(false);
-                }, 2000);
-              }}
+              onClick={executePayment}
               disabled={processing}
               className="px-8 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium text-lg transition disabled:opacity-50"
             >

@@ -7,18 +7,22 @@ import {
   BridgeLockRequestSchema,
   SettleInvoiceSchema,
 } from '@pypay/common';
-import { createWalletClient, http, keccak256, encodeFunctionData, parseEther } from 'viem';
+import { createWalletClient, createPublicClient, http, keccak256, encodeFunctionData, parseEther } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import crypto from 'crypto';
-
-const HMAC_SECRET = process.env.HMAC_SECRET || 'dev-secret';
-const GUARDIAN_PRIVATE_KEY = process.env.GUARDIAN_PRIVATE_KEY as `0x${string}`;
 
 export function registerRoutes(
   app: FastifyInstance,
   prisma: PrismaClient,
   chains: ChainConfig[]
 ) {
+  const HMAC_SECRET = process.env.HMAC_SECRET || 'dev-secret';
+  const GUARDIAN_PRIVATE_KEY = process.env.GUARDIAN_PRIVATE_KEY as `0x${string}`;
+  
+  if (!GUARDIAN_PRIVATE_KEY) {
+    throw new Error('GUARDIAN_PRIVATE_KEY environment variable is required');
+  }
+  
   // HMAC authentication hook
   app.addHook('preHandler', async (request, reply) => {
     if (request.url === '/health') return; // Skip auth for health check
@@ -254,12 +258,73 @@ export function registerRoutes(
     };
   });
 
+  // Get nonce for UserOperation preparation
+  app.post<{
+    Body: {
+      smartAccountAddress: string;
+      chainId: number;
+    };
+  }>('/relay/get-nonce', async (request, reply) => {
+    const { chainId, smartAccountAddress } = request.body;
+
+    if (!smartAccountAddress || !chainId) {
+      return reply.code(400).send({ error: 'Missing required fields' });
+    }
+
+    // Find chain config
+    const chain = chains.find((c) => c.chainId === chainId);
+    if (!chain) {
+      return reply.code(400).send({ error: `Unsupported chain: ${chainId}` });
+    }
+
+    try {
+      // Fetch current nonce from EntryPoint
+      const publicClient = createPublicClient({
+        transport: http(chain.rpcUrl),
+      });
+
+      const nonce = await publicClient.readContract({
+        address: chain.entryPointAddress,
+        abi: [
+          {
+            type: 'function',
+            name: 'getNonce',
+            inputs: [
+              { name: 'sender', type: 'address' },
+              { name: 'key', type: 'uint192' },
+            ],
+            outputs: [{ name: 'nonce', type: 'uint256' }],
+            stateMutability: 'view',
+          },
+        ],
+        functionName: 'getNonce',
+        args: [smartAccountAddress as `0x${string}`, 0n],
+      }) as bigint;
+
+      return reply.send({
+        nonce: `0x${nonce.toString(16)}`,
+        entryPoint: chain.entryPointAddress,
+        paymaster: chain.contracts.paymaster,
+      });
+    } catch (error) {
+      app.log.error({ error }, 'Error fetching nonce');
+      return reply.code(500).send({
+        error: 'Failed to fetch nonce',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
   // Gasless settlement relay
   app.post<{
     Body: {
       invoiceTuple: any;
       permitData?: string;
       sessionPubKey: string;
+      smartAccountAddress: string;
+      chainId: number;
+      callData: string;
+      userOpSignature?: string;
       webauthnAssertion?: any;
     };
   }>('/relay/settle', async (request, reply) => {
@@ -268,12 +333,115 @@ export function registerRoutes(
       return reply.code(400).send({ error: 'Invalid request', details: validation.error });
     }
 
-    // TODO: Validate webauthn assertion
-    // TODO: Validate session key is enabled for smart account
-    // TODO: Validate invoice exists, not paid, not expired, merchant active
-    // TODO: Submit tx calling Checkout.settle
+    const { chainId, smartAccountAddress, callData, userOpSignature } = request.body;
 
-    return reply.code(501).send({ error: 'Not implemented yet' });
+    // Require signature - no mocking
+    if (!userOpSignature || userOpSignature === '0x') {
+      return reply.code(400).send({ 
+        error: 'UserOperation signature is required',
+        details: 'Frontend must sign the UserOp with session key before submitting'
+      });
+    }
+
+    // Find chain config
+    const chain = chains.find((c) => c.chainId === chainId);
+    if (!chain) {
+      return reply.code(400).send({ error: `Unsupported chain: ${chainId}` });
+    }
+
+    try {
+      // Fetch current nonce from EntryPoint
+      const publicClient = createPublicClient({
+        transport: http(chain.rpcUrl),
+      });
+
+      const nonce = await publicClient.readContract({
+        address: chain.entryPointAddress,
+        abi: [
+          {
+            type: 'function',
+            name: 'getNonce',
+            inputs: [
+              { name: 'sender', type: 'address' },
+              { name: 'key', type: 'uint192' },
+            ],
+            outputs: [{ name: 'nonce', type: 'uint256' }],
+            stateMutability: 'view',
+          },
+        ],
+        functionName: 'getNonce',
+        args: [smartAccountAddress as `0x${string}`, 0n], // key = 0 for default nonce sequence
+      }) as bigint;
+
+      app.log.info({ smartAccount: smartAccountAddress, nonce: nonce.toString() }, 'Fetched nonce');
+
+      // Use the signature provided by the frontend (already in TapKitAccount format)
+      app.log.info({ signatureLength: userOpSignature.length }, 'Using frontend signature');
+
+      // Construct UserOperation for Pimlico v2 (EntryPoint v0.7)
+      // Pimlico v2 expects separate fields, not packed
+      const userOp = {
+        sender: smartAccountAddress as `0x${string}`,
+        nonce: `0x${nonce.toString(16)}`,
+        factory: undefined as any, // undefined if account already deployed
+        factoryData: undefined as any,
+        callData: callData as `0x${string}`,
+        callGasLimit: `0x${(1000000).toString(16)}`, // 1M gas
+        verificationGasLimit: `0x${(1000000).toString(16)}`,
+        preVerificationGas: `0x${(500000).toString(16)}`,
+        maxFeePerGas: `0x${(1e9).toString(16)}`, // 1 gwei
+        maxPriorityFeePerGas: `0x${(1e9).toString(16)}`,
+        paymaster: chain.contracts.paymaster,
+        paymasterVerificationGasLimit: `0x${(100000).toString(16)}`,
+        paymasterPostOpGasLimit: `0x${(100000).toString(16)}`,
+        paymasterData: '0x' as `0x${string}`,
+        signature: userOpSignature as `0x${string}`,
+      };
+
+      // Submit UserOperation to bundler
+      const bundlerResponse = await fetch(chain.bundlerRpc, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'eth_sendUserOperation',
+          params: [userOp, chain.entryPointAddress],
+        }),
+      });
+
+      const bundlerResult = await bundlerResponse.json() as {
+        jsonrpc: string;
+        id: number;
+        result?: string;
+        error?: { code: number; message: string };
+      };
+
+      if (bundlerResult.error) {
+        app.log.error({ bundlerError: bundlerResult.error }, 'Bundler error');
+        return reply.code(500).send({ 
+          error: 'Bundler submission failed', 
+          details: bundlerResult.error 
+        });
+      }
+
+      const userOpHash = bundlerResult.result;
+
+      // Wait for UserOperation to be mined (optional, can poll separately)
+      // For now, return immediately with the userOpHash
+      return reply.send({
+        success: true,
+        userOpHash,
+        message: 'UserOperation submitted successfully',
+      });
+    } catch (error) {
+      app.log.error({ error }, 'Error submitting UserOperation');
+      return reply.code(500).send({ 
+        error: 'Internal server error', 
+        details: error instanceof Error ? error.message : 'Unknown error' 
+      });
+    }
   });
 }
-

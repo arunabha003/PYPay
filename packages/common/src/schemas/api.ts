@@ -18,9 +18,9 @@ export const CreateInvoiceSchema = z.object({
 export const InvoiceTupleSchema = z.object({
   invoiceId: HexSchema,
   merchant: AddressSchema,
-  amount: z.string(),
-  expiry: z.number().int(),
-  chainId: ChainIdSchema,
+  amount: z.union([z.string(), z.number()]).transform(val => String(val)), // Accept string or number, convert to string
+  expiry: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseInt(val, 10) : val), // Accept string or number, convert to number
+  chainId: z.union([z.string(), z.number()]).transform(val => typeof val === 'string' ? parseInt(val, 10) : val), // Accept string or number, convert to number
   memoHash: HexSchema,
 });
 
@@ -29,6 +29,10 @@ export const SettleInvoiceSchema = z.object({
   invoiceTuple: InvoiceTupleSchema,
   permitData: z.string().optional(),
   sessionPubKey: HexSchema,
+  smartAccountAddress: HexSchema, // ERC-4337 smart account address
+  chainId: ChainIdSchema,
+  callData: HexSchema, // Encoded Checkout.settle() call
+  userOpSignature: HexSchema.optional(), // Pre-signed UserOp signature from frontend
   webauthnAssertion: z.object({
     id: z.string(),
     rawId: z.string(),

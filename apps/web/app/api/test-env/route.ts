@@ -1,0 +1,10 @@
+import { NextResponse } from 'next/server';
+
+export async function GET() {
+  return NextResponse.json({
+    NEXT_PUBLIC_ACCOUNT_FACTORY_ARBSEPOLIA: process.env.NEXT_PUBLIC_ACCOUNT_FACTORY_ARBSEPOLIA || 'NOT SET',
+    NEXT_PUBLIC_INVOICE_ARBSEPOLIA: process.env.NEXT_PUBLIC_INVOICE_ARBSEPOLIA || 'NOT SET',
+    NEXT_PUBLIC_TEST_OWNER: process.env.NEXT_PUBLIC_TEST_OWNER || 'NOT SET',
+    NEXT_PUBLIC_GUARDIAN_ADDRESS: process.env.NEXT_PUBLIC_GUARDIAN_ADDRESS || 'NOT SET',
+  });
+}
