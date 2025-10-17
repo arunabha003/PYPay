@@ -20,15 +20,6 @@ function getEnv(name: string, fallback: string = ''): string {
 
 // Load chains configuration
 export function getChains(): ChainConfig[] {
-  // In production, this would load from chains.config.json
-  // For now, we'll use environment variables
-  
-  // Debug logging
-  console.log('[Config] Loading chain configurations...');
-  console.log('[Config] NEXT_PUBLIC_ACCOUNT_FACTORY_ARBSEPOLIA:', process.env.NEXT_PUBLIC_ACCOUNT_FACTORY_ARBSEPOLIA);
-  console.log('[Config] NEXT_PUBLIC_INVOICE_ARBSEPOLIA:', process.env.NEXT_PUBLIC_INVOICE_ARBSEPOLIA);
-  
-  // HARDCODED VALUES FOR LOCAL DEVELOPMENT
   return [
     {
       name: 'Arbitrum Sepolia',
@@ -43,7 +34,7 @@ export function getChains(): ChainConfig[] {
         merchantRegistry: (process.env.NEXT_PUBLIC_REGISTRY_ARBSEPOLIA || '0x3524E03B46e05Df7c6ba9836D04DBFAB409c03d1') as Address,
         invoice: (process.env.NEXT_PUBLIC_INVOICE_ARBSEPOLIA || '0x0e724267431C7131B53BE4F6E41310FDFE01c50f') as Address,
         checkout: (process.env.NEXT_PUBLIC_CHECKOUT_ARBSEPOLIA || '0xf588f57BE135813d305815Dc3E71960c97987b19') as Address,
-        paymaster: (process.env.NEXT_PUBLIC_PAYMASTER_ARBSEPOLIA || '0x3F2e0D3e17Fab0C61f2944CE35b07F7CFA684419') as Address,
+        paymaster: (process.env.NEXT_PUBLIC_PAYMASTER_ARBSEPOLIA || '0x9a81C9fAddbcBfB565cccdc47A04013aD55695b9') as Address,
         bridgeEscrow: (process.env.NEXT_PUBLIC_BRIDGE_ESCROW_ARBSEPOLIA || '0x18af4b36A524F50ba44A61C6F6CACe908c2d02EA') as Address,
         accountFactory: (process.env.NEXT_PUBLIC_ACCOUNT_FACTORY_ARBSEPOLIA || '0x07150543b2F1fda0de261E80f6C1e75EE6046aDf') as Address,
       },

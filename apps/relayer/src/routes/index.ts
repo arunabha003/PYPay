@@ -176,6 +176,7 @@ export function registerRoutes(
       const digest = keccak256(concat([toHex(prefix), innerHash]));
 
       app.log.info({ digest }, 'Final digest for signing');
+      app.log.info({ smartAccount, pubKeyHash, validUntil, policyId }, 'Signing parameters');
 
       // Sign the digest directly (NOT using signMessage which would add another prefix)
       const guardian = privateKeyToAccount(GUARDIAN_PRIVATE_KEY);
