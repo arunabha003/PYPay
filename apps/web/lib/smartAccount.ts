@@ -44,6 +44,9 @@ export async function getSmartAccountAddress(
   salt: bigint,
   rpcUrl: string
 ): Promise<Address> {
+  if (!factoryAddress || (factoryAddress as string).length !== 42) {
+    throw new Error('AccountFactory address is missing or invalid. Set NEXT_PUBLIC_ACCOUNT_FACTORY_*');
+  }
   const client = createPublicClient({
     transport: http(rpcUrl),
   });

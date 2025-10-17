@@ -1,36 +1,93 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import QRCode from 'qrcode';
+
+interface Merchant {
+  address: string;
+  payoutAddress: string;
+  feeBps: number;
+  active: boolean;
+  chainId: number;
+}
 
 export default function CreateInvoice() {
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   const [expiry, setExpiry] = useState('30');
   const [chainId, setChainId] = useState(421614);
+  const [merchantAddress, setMerchantAddress] = useState('');
+  const [merchants, setMerchants] = useState<Merchant[]>([]);
   const [qrCode, setQRCode] = useState('');
   const [invoiceId, setInvoiceId] = useState('');
+  const [txHash, setTxHash] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMerchants, setLoadingMerchants] = useState(true);
+  const [error, setError] = useState('');
+
+  // Fetch registered merchants
+  useEffect(() => {
+    async function fetchMerchants() {
+      try {
+        setLoadingMerchants(true);
+        const response = await fetch(`/api/merchants?chainId=${chainId}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch merchants');
+        }
+        const data = await response.json();
+        setMerchants(data.merchants || []);
+        
+        // Auto-select first merchant if available
+        if (data.merchants && data.merchants.length > 0) {
+          setMerchantAddress(data.merchants[0].address);
+        }
+      } catch (err) {
+        console.error('Failed to fetch merchants:', err);
+        setError('Failed to load merchants. Please ensure the indexer is running.');
+      } finally {
+        setLoadingMerchants(false);
+      }
+    }
+
+    fetchMerchants();
+  }, [chainId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
 
     try {
-      // In production, this would call the Invoice contract
-      // For MVP, generate mock invoice ID
-      const randomBytes = new Uint8Array(32);
-      crypto.getRandomValues(randomBytes);
-      const id =
-        '0x' +
-        Array.from(randomBytes)
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('');
+      if (!merchantAddress) {
+        throw new Error('Please select a merchant');
+      }
 
-      setInvoiceId(id);
+      // Create invoice on-chain via API
+      const response = await fetch('/api/invoice/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chainId,
+          merchant: merchantAddress,
+          amount: parseFloat(amount),
+          expiryMinutes: parseInt(expiry),
+          memo,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to create invoice');
+      }
+
+      const result = await response.json();
+      setInvoiceId(result.invoiceId);
+      setTxHash(result.txHash);
 
       // Generate QR code for checkout URL
-      const checkoutUrl = `${window.location.origin}/checkout/${id}`;
+      const checkoutUrl = `${window.location.origin}/checkout/${result.invoiceId}`;
       const qr = await QRCode.toDataURL(checkoutUrl, {
         width: 400,
         margin: 2,
@@ -42,16 +99,18 @@ export default function CreateInvoice() {
       setQRCode(qr);
 
       console.log('Invoice created:', {
-        id,
+        id: result.invoiceId,
+        txHash: result.txHash,
         amount,
         memo,
         expiry,
         chainId,
+        merchantAddress,
         checkoutUrl,
       });
     } catch (error) {
       console.error('Failed to create invoice:', error);
-      alert('Failed to create invoice. Please try again.');
+      setError(error instanceof Error ? error.message : 'Failed to create invoice. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -93,8 +152,41 @@ export default function CreateInvoice() {
         Generate a payment request with QR code and optional NFC tag
       </p>
 
+      {error && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+          {error}
+        </div>
+      )}
+
       {!invoiceId ? (
         <form onSubmit={handleSubmit} className="bg-white p-8 rounded-lg shadow-lg">
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Merchant *
+            </label>
+            {loadingMerchants ? (
+              <div className="text-gray-500">Loading merchants...</div>
+            ) : merchants.length === 0 ? (
+              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm">
+                No merchants registered on this chain. Please register a merchant first.
+              </div>
+            ) : (
+              <select
+                value={merchantAddress}
+                onChange={(e) => setMerchantAddress(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                required
+              >
+                {merchants.map((merchant) => (
+                  <option key={merchant.address} value={merchant.address}>
+                    {merchant.address} {!merchant.active && '(Inactive)'}
+                  </option>
+                ))}
+              </select>
+            )}
+            <p className="text-sm text-gray-500 mt-1">Select the merchant receiving payment</p>
+          </div>
+
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Amount (PYUSD) *
@@ -171,12 +263,29 @@ export default function CreateInvoice() {
         <div className="bg-white p-8 rounded-lg shadow-lg text-center">
           <div className="text-green-600 text-6xl mb-4">✓</div>
           <h2 className="text-2xl font-bold mb-2 text-green-600">Invoice Created!</h2>
-          <p className="text-gray-600 mb-6">
+          <p className="text-gray-600 mb-2">
             Invoice ID: <span className="font-mono text-sm">{invoiceId.slice(0, 16)}...</span>
           </p>
+          {txHash && (
+            <p className="text-gray-600 mb-6">
+              Transaction:{' '}
+              <a
+                href={`${chainId === 421614 ? 'https://sepolia.arbiscan.io' : 'https://sepolia.etherscan.io'}/tx/${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary-600 hover:underline font-mono text-sm"
+              >
+                {txHash.slice(0, 16)}...
+              </a>
+            </p>
+          )}
 
           <div className="bg-gray-50 p-6 rounded-lg mb-6">
             <div className="grid grid-cols-2 gap-4 text-left mb-4">
+              <div>
+                <span className="text-sm text-gray-600">Merchant:</span>
+                <div className="font-mono text-xs">{merchantAddress}</div>
+              </div>
               <div>
                 <span className="text-sm text-gray-600">Amount:</span>
                 <div className="font-semibold">{parseFloat(amount).toFixed(2)} PYUSD</div>
@@ -246,4 +355,5 @@ export default function CreateInvoice() {
     </div>
   );
 }
+
 

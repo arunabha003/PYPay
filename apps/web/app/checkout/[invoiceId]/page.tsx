@@ -5,9 +5,10 @@ import { useParams } from 'next/navigation';
 import { authenticatePasskey, registerPasskey, hasPasskey } from '@/lib/passkey';
 import { generateSessionKey, getSessionKey } from '@/lib/sessionKey';
 import { getOrCreateSmartAccount, getPYUSDBalance } from '@/lib/smartAccount';
+import { getChainById } from '@/lib/config';
 
 const INDEXER_URL = process.env.NEXT_PUBLIC_INDEXER_URL || 'http://localhost:3001';
-const GUARDIAN_ADDRESS = '0x0000000000000000000000000000000000000001'; // From config
+const GUARDIAN_ADDRESS =process.env.NEXT_PUBLIC_GUARDIAN_ADDRESS || '0x0000000000000000000000000000000000000001'; // From config
 
 interface Invoice {
   id: string;
@@ -96,16 +97,38 @@ export default function CheckoutPage() {
         sessionKey = generateSessionKey(1);
       }
 
-      // Get smart account (mock for MVP)
-      const mockOwner = '0x' + Array.from(new Uint8Array(20)).map(b => 'f').join('');
-      const mockFactoryAddress = '0x' + Array.from(new Uint8Array(20)).map(b => '1').join('');
-      const mockRpcUrl = 'https://sepolia-rollup.arbitrum.io/rpc';
+      // Resolve chain for the invoice (default to Arbitrum Sepolia)
+      const chainId = (invoice?.chainId as number) || 421614;
+      const chain = getChainById(chainId);
+      if (!chain) throw new Error(`Chain ${chainId} not configured`);
+
+      console.log('Checkout config:', {
+        chainId,
+        rpcUrl: chain.rpcUrl,
+        accountFactory: chain.contracts.accountFactory,
+        testOwner: process.env.NEXT_PUBLIC_TEST_OWNER,
+        guardian: GUARDIAN_ADDRESS,
+      });
+
+      if (!chain.rpcUrl) throw new Error(`Missing RPC URL for chain ${chainId}`);
+      if (!chain.contracts.accountFactory || (chain.contracts.accountFactory as string).length !== 42) {
+        throw new Error(`Missing NEXT_PUBLIC_ACCOUNT_FACTORY_* for chain ${chainId}`);
+      }
+      if (!process.env.NEXT_PUBLIC_TEST_OWNER) throw new Error('Missing NEXT_PUBLIC_TEST_OWNER');
+
+      // Owner address for MVP: use a configured test owner
+      const testOwner = process.env.NEXT_PUBLIC_TEST_OWNER as string | undefined;
+      if (!testOwner) throw new Error('NEXT_PUBLIC_TEST_OWNER is not set');
+
+      if (!chain.contracts.accountFactory) {
+        throw new Error('Missing NEXT_PUBLIC_ACCOUNT_FACTORY_* for selected chain');
+      }
 
       const { address } = await getOrCreateSmartAccount(
-        mockOwner as any,
+        testOwner as any,
         GUARDIAN_ADDRESS as any,
-        mockFactoryAddress as any,
-        mockRpcUrl,
+        chain.contracts.accountFactory as any,
+        chain.rpcUrl,
         0n
       );
 

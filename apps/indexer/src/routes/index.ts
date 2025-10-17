@@ -53,6 +53,26 @@ export function registerRoutes(
     return invoice;
   });
 
+  // Get all merchants
+  app.get<{
+    Querystring: { chainId?: string };
+  }>('/merchants', async (request) => {
+    const chainId = request.query.chainId ? parseInt(request.query.chainId, 10) : undefined;
+
+    const where: any = {};
+    if (chainId) where.chainId = chainId;
+
+    const merchants = await prisma.merchant.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return {
+      merchants,
+      total: merchants.length,
+    };
+  });
+
   // Get merchant invoices
   app.get<{
     Params: { address: string };
