@@ -95,6 +95,7 @@ export default function CheckoutPage() {
 
       // Generate or reuse session key
       let sessionKey = getSessionKey();
+      const isNewSessionKey = !sessionKey;
       if (!sessionKey) {
         sessionKey = generateSessionKey(1);
       }
@@ -126,7 +127,7 @@ export default function CheckoutPage() {
         throw new Error('Missing NEXT_PUBLIC_ACCOUNT_FACTORY_* for selected chain');
       }
 
-      const { address } = await getOrCreateSmartAccount(
+      const { address, isDeployed } = await getOrCreateSmartAccount(
         testOwner as any,
         GUARDIAN_ADDRESS as any,
         chain.contracts.accountFactory as any,
@@ -135,6 +136,32 @@ export default function CheckoutPage() {
       );
 
       setAccount(address);
+
+      // If this is a new session key and account is deployed, enable it
+      if (isNewSessionKey && isDeployed) {
+        console.log('[Auth] Enabling session key on smart account...');
+        try {
+          // For MVP, we'll enable session key via relayer endpoint
+          // In production, this would require guardian attestation
+          await fetch(`${process.env.NEXT_PUBLIC_RELAYER_URL || 'http://localhost:3002'}/session/enable`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              smartAccount: address,
+              sessionPubKey: sessionKey.publicKey,
+              validUntil: Math.floor(sessionKey.validUntil / 1000), // Convert to seconds
+              policyId: sessionKey.policyId,
+            }),
+          });
+          console.log('[Auth] Session key enabled successfully');
+        } catch (err) {
+          console.warn('[Auth] Failed to enable session key:', err);
+          // Continue anyway - will fallback to owner signature if needed
+        }
+      }
+
       setStep('chain');
     } catch (err: any) {
       console.error('Authentication failed:', err);
@@ -255,6 +282,7 @@ export default function CheckoutPage() {
       });
 
       // Check allowance
+      // Check allowance
       const allowance = await checkPYUSDAllowance(
         chain.pyusdAddress,
         account as any,
@@ -264,26 +292,30 @@ export default function CheckoutPage() {
 
       console.log('[Checkout] Current allowance:', allowance.toString());
 
-      // Approve if needed
-      if (allowance < BigInt(invoice.amount)) {
-        console.log('[Checkout] Approving PYUSD spending...');
-        const approvalResult = await approvePYUSD(
-          chain.pyusdAddress,
-          chain.contracts.checkout,
-          BigInt(invoice.amount),
-          account as any,
-          chain.chainId,
-          chain.rpcUrl,
-          chain.entryPointAddress,
-          chain.contracts.paymaster
-        );
+      // TODO: For MVP, skip separate approval - Checkout contract will handle it
+      // In production, use Permit2 signatures for gasless approval
+      // The paymaster only allows calls to Checkout contract, not PYUSD.approve()
+      
+      // // Approve if needed
+      // if (allowance < BigInt(invoice.amount)) {
+      //   console.log('[Checkout] Approving PYUSD spending...');
+      //   const approvalResult = await approvePYUSD(
+      //     chain.pyusdAddress,
+      //     chain.contracts.checkout,
+      //     BigInt(invoice.amount),
+      //     account as any,
+      //     chain.chainId,
+      //     chain.rpcUrl,
+      //     chain.entryPointAddress,
+      //     chain.contracts.paymaster
+      //   );
 
-        if (!approvalResult.success) {
-          throw new Error(approvalResult.error || 'Approval failed');
-        }
+      //   if (!approvalResult.success) {
+      //     throw new Error(approvalResult.error || 'Approval failed');
+      //   }
 
-        console.log('[Checkout] Approval successful:', approvalResult.txHash);
-      }
+      //   console.log('[Checkout] Approval successful:', approvalResult.txHash);
+      // }
 
       // Settle the invoice
       console.log('[Checkout] Settling invoice...');

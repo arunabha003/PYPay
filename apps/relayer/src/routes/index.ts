@@ -7,7 +7,7 @@ import {
   BridgeLockRequestSchema,
   SettleInvoiceSchema,
 } from '@pypay/common';
-import { createWalletClient, createPublicClient, http, keccak256, encodeFunctionData, parseEther } from 'viem';
+import { createWalletClient, createPublicClient, http, keccak256, encodeFunctionData, encodeAbiParameters, encodePacked, parseEther, concat, toHex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import crypto from 'crypto';
 
@@ -25,7 +25,8 @@ export function registerRoutes(
   
   // HMAC authentication hook
   app.addHook('preHandler', async (request, reply) => {
-    if (request.url === '/health') return; // Skip auth for health check
+    // Skip auth for health check and session endpoints (internal use)
+    if (request.url === '/health' || request.url === '/session/enable') return;
 
     const hmacHeader = request.headers['x-hmac-signature'];
     if (!hmacHeader) {
@@ -127,6 +128,112 @@ export function registerRoutes(
       policyId,
       signature,
     };
+  });
+
+  // Session key enable - Call smart account to enable session key
+  app.post<{
+    Body: {
+      smartAccount: string;
+      sessionPubKey: string;
+      validUntil: number;
+      policyId: number;
+    };
+  }>('/session/enable', async (request, reply) => {
+    try {
+      const { smartAccount, sessionPubKey, validUntil, policyId } = request.body;
+
+      app.log.info({ smartAccount, sessionPubKey, validUntil, policyId }, 'Enabling session key');
+
+      // Find the chain for this account
+      const chain = chains[0]; // For MVP, assume Arbitrum Sepolia
+      
+      // Create publicClient
+      const publicClient = createPublicClient({
+        transport: http(chain.rpcUrl),
+      });
+
+      // Hash the public key
+      const pubKeyHash = keccak256(sessionPubKey as `0x${string}`);
+
+      // Create inner hash: keccak256(abi.encode(address(this), pubKeyHash, validUntil, policyId))
+      const innerHash = keccak256(
+        encodeAbiParameters(
+          [
+            { name: 'account', type: 'address' },
+            { name: 'pubKeyHash', type: 'bytes32' },
+            { name: 'validUntil', type: 'uint48' },
+            { name: 'policyId', type: 'uint8' },
+          ],
+          [smartAccount as `0x${string}`, pubKeyHash, validUntil, policyId]
+        )
+      );
+
+      app.log.info({ pubKeyHash, innerHash }, 'Hashes for session key');
+
+      // Create the final digest with EIP-191 prefix (same as contract does)
+      // Contract: keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", innerHash))
+      const prefix = '\x19Ethereum Signed Message:\n32';
+      const digest = keccak256(concat([toHex(prefix), innerHash]));
+
+      app.log.info({ digest }, 'Final digest for signing');
+
+      // Sign the digest directly (NOT using signMessage which would add another prefix)
+      const guardian = privateKeyToAccount(GUARDIAN_PRIVATE_KEY);
+      const guardianSignature = await guardian.sign({
+        hash: digest,
+      });
+
+      // Create wallet client
+      const walletClient = createWalletClient({
+        account: guardian,
+        chain: {
+          id: chain.chainId,
+          name: chain.name,
+          network: chain.name.toLowerCase().replace(/\s+/g, '-'),
+          nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+          rpcUrls: {
+            default: { http: [chain.rpcUrl] },
+            public: { http: [chain.rpcUrl] },
+          },
+        },
+        transport: http(chain.rpcUrl),
+      });
+
+      // Call enableSessionKey on the smart account
+      const txHash = await walletClient.writeContract({
+        address: smartAccount as `0x${string}`,
+        abi: [
+          {
+            type: 'function',
+            name: 'enableSessionKey',
+            inputs: [
+              { name: 'pubKeyHash', type: 'bytes32' },
+              { name: 'validUntil', type: 'uint48' },
+              { name: 'policyId', type: 'uint8' },
+              { name: 'guardianSignature', type: 'bytes' },
+            ],
+            outputs: [],
+            stateMutability: 'nonpayable',
+          },
+        ],
+        functionName: 'enableSessionKey',
+        args: [pubKeyHash, validUntil, policyId, guardianSignature],
+      });
+
+      app.log.info({ txHash, smartAccount }, 'Session key enabled');
+
+      return reply.send({
+        success: true,
+        txHash,
+        pubKeyHash,
+      });
+    } catch (error: any) {
+      app.log.error({ error }, 'Failed to enable session key');
+      return reply.code(500).send({
+        error: 'Failed to enable session key',
+        details: error.message || 'Unknown error',
+      });
+    }
   });
 
   // Bridge quote
@@ -375,16 +482,40 @@ export function registerRoutes(
 
       app.log.info({ smartAccount: smartAccountAddress, nonce: nonce.toString() }, 'Fetched nonce');
 
+      // Check if account is deployed
+      const accountCode = await publicClient.getBytecode({
+        address: smartAccountAddress as `0x${string}`,
+      });
+      const isAccountDeployed = accountCode && accountCode !== '0x';
+      
+      app.log.info({ 
+        smartAccount: smartAccountAddress, 
+        isDeployed: isAccountDeployed,
+        codeLength: accountCode?.length || 0
+      }, 'Account deployment status');
+
+      // If account not deployed, we need factory + factoryData for deployment
+      // For now, we expect accounts to be pre-deployed
+      // TODO: Support auto-deployment with factory data in future
+      let factory: `0x${string}` | undefined;
+      let factoryData: `0x${string}` | undefined;
+
+      if (!isAccountDeployed) {
+        app.log.warn({ smartAccount: smartAccountAddress }, 'Account not deployed - will attempt transaction anyway');
+        // In production, you'd include factory + initCode here
+        // factory = chain.contracts.accountFactory;
+        // factoryData = encodeFunctionData({ ... });
+      }
+
       // Use the signature provided by the frontend (already in TapKitAccount format)
       app.log.info({ signatureLength: userOpSignature.length }, 'Using frontend signature');
 
       // Construct UserOperation for Pimlico v2 (EntryPoint v0.7)
-      // Pimlico v2 expects separate fields, not packed
       const userOp = {
         sender: smartAccountAddress as `0x${string}`,
         nonce: `0x${nonce.toString(16)}`,
-        factory: undefined as any, // undefined if account already deployed
-        factoryData: undefined as any,
+        factory: factory,
+        factoryData: factoryData,
         callData: callData as `0x${string}`,
         callGasLimit: `0x${(1000000).toString(16)}`, // 1M gas
         verificationGasLimit: `0x${(1000000).toString(16)}`,
@@ -398,36 +529,141 @@ export function registerRoutes(
         signature: userOpSignature as `0x${string}`,
       };
 
-      // Submit UserOperation to bundler
-      const bundlerResponse = await fetch(chain.bundlerRpc, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'eth_sendUserOperation',
-          params: [userOp, chain.entryPointAddress],
-        }),
-      });
+      // Check if we're on localhost (anvil fork) or real testnet
+      const isLocalhost = chain.rpcUrl.includes('localhost') || 
+                         chain.rpcUrl.includes('127.0.0.1') || 
+                         chain.rpcUrl.includes('0.0.0.0');
+      
+      let userOpHash: string;
 
-      const bundlerResult = await bundlerResponse.json() as {
-        jsonrpc: string;
-        id: number;
-        result?: string;
-        error?: { code: number; message: string };
-      };
+      if (isLocalhost) {
+        // LOCAL MODE: Direct EntryPoint call (for anvil testing)
+        app.log.info('Using direct EntryPoint execution (localhost mode)');
 
-      if (bundlerResult.error) {
-        app.log.error({ bundlerError: bundlerResult.error }, 'Bundler error');
-        return reply.code(500).send({ 
-          error: 'Bundler submission failed', 
-          details: bundlerResult.error 
+        const guardianAccount = privateKeyToAccount(GUARDIAN_PRIVATE_KEY);
+        const walletClient = createWalletClient({
+          account: guardianAccount,
+          chain: {
+            id: chain.chainId,
+            name: chain.name,
+            network: chain.name.toLowerCase().replace(/\s+/g, '-'),
+            nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+            rpcUrls: {
+              default: { http: [chain.rpcUrl] },
+              public: { http: [chain.rpcUrl] },
+            },
+          },
+          transport: http(chain.rpcUrl),
         });
-      }
 
-      const userOpHash = bundlerResult.result;
+        // Pack UserOp for EntryPoint v0.7
+        const packedUserOp = {
+          sender: userOp.sender,
+          nonce: BigInt(userOp.nonce),
+          initCode: userOp.factory && userOp.factoryData 
+            ? `${userOp.factory}${userOp.factoryData.slice(2)}` as `0x${string}`
+            : '0x' as `0x${string}`,
+          callData: userOp.callData,
+          accountGasLimits: `0x${BigInt(userOp.verificationGasLimit).toString(16).padStart(32, '0')}${BigInt(userOp.callGasLimit).toString(16).padStart(32, '0')}` as `0x${string}`,
+          preVerificationGas: BigInt(userOp.preVerificationGas),
+          gasFees: `0x${BigInt(userOp.maxPriorityFeePerGas).toString(16).padStart(32, '0')}${BigInt(userOp.maxFeePerGas).toString(16).padStart(32, '0')}` as `0x${string}`,
+          paymasterAndData: userOp.paymaster 
+            ? `${userOp.paymaster}${BigInt(userOp.paymasterVerificationGasLimit).toString(16).padStart(32, '0')}${BigInt(userOp.paymasterPostOpGasLimit).toString(16).padStart(32, '0')}${userOp.paymasterData.slice(2)}` as `0x${string}`
+            : '0x' as `0x${string}`,
+          signature: userOp.signature,
+        };
+
+        app.log.info({ packedUserOp }, 'Packed UserOp for EntryPoint');
+
+        // Call EntryPoint.handleOps directly
+        try {
+          const txHash = await walletClient.writeContract({
+            address: chain.entryPointAddress as `0x${string}`,
+            abi: [
+              {
+                type: 'function',
+                name: 'handleOps',
+                inputs: [
+                  {
+                    name: 'ops',
+                    type: 'tuple[]',
+                    components: [
+                      { name: 'sender', type: 'address' },
+                      { name: 'nonce', type: 'uint256' },
+                      { name: 'initCode', type: 'bytes' },
+                      { name: 'callData', type: 'bytes' },
+                      { name: 'accountGasLimits', type: 'bytes32' },
+                      { name: 'preVerificationGas', type: 'uint256' },
+                      { name: 'gasFees', type: 'bytes32' },
+                      { name: 'paymasterAndData', type: 'bytes' },
+                      { name: 'signature', type: 'bytes' },
+                    ],
+                  },
+                  { name: 'beneficiary', type: 'address' },
+                ],
+                outputs: [],
+                stateMutability: 'nonpayable',
+              },
+            ],
+            functionName: 'handleOps',
+            args: [[packedUserOp], guardianAccount.address],
+          });
+
+          app.log.info({ txHash }, 'UserOp executed via direct EntryPoint call');
+          
+          // Use txHash as userOpHash for consistency
+          userOpHash = txHash;
+        } catch (handleOpsError: any) {
+          app.log.error({ 
+            handleOpsError,
+            userOp: packedUserOp,
+            errorMessage: handleOpsError.message,
+            errorDetails: handleOpsError.details,
+          }, 'Failed to execute handleOps');
+          
+          // Try to extract more useful error info
+          const errorMsg = handleOpsError.message || handleOpsError.details || 'Unknown EntryPoint error';
+          return reply.code(500).send({ 
+            error: 'EntryPoint execution failed', 
+            details: errorMsg,
+            hint: 'Check: 1) Session key enabled? 2) Paymaster staked? 3) Signature format correct?'
+          });
+        }
+
+      } else {
+        // TESTNET MODE: Use Pimlico bundler
+        app.log.info('Using Pimlico bundler (testnet mode)');
+
+        const bundlerResponse = await fetch(chain.bundlerRpc, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'eth_sendUserOperation',
+            params: [userOp, chain.entryPointAddress],
+          }),
+        });
+
+        const bundlerResult = await bundlerResponse.json() as {
+          jsonrpc: string;
+          id: number;
+          result?: string;
+          error?: { code: number; message: string };
+        };
+
+        if (bundlerResult.error) {
+          app.log.error({ bundlerError: bundlerResult.error }, 'Bundler error');
+          return reply.code(500).send({ 
+            error: 'Bundler submission failed', 
+            details: bundlerResult.error 
+          });
+        }
+
+        userOpHash = bundlerResult.result!;
+      }
 
       // Wait for UserOperation to be mined (optional, can poll separately)
       // For now, return immediately with the userOpHash

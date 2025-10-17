@@ -127,8 +127,8 @@ export async function settleInvoice(
       memoHash: invoice.memoHash as Hex,
     };
 
-    // Encode the settlement call
-    const callData = encodeFunctionData({
+    // Encode the inner settlement call
+    const innerCallData = encodeFunctionData({
       abi: CHECKOUT_ABI,
       functionName: 'settle',
       args: [
@@ -136,6 +136,25 @@ export async function settleInvoice(
         payerAddress,
         '0x' as Hex, // Empty permitData - using standard approval
       ],
+    });
+
+    // Wrap in smart account's execute(address,uint256,bytes) call
+    const callData = encodeFunctionData({
+      abi: [
+        {
+          type: 'function',
+          name: 'execute',
+          inputs: [
+            { name: 'target', type: 'address' },
+            { name: 'value', type: 'uint256' },
+            { name: 'data', type: 'bytes' },
+          ],
+          outputs: [],
+          stateMutability: 'nonpayable',
+        },
+      ] as const,
+      functionName: 'execute',
+      args: [checkoutAddress, 0n, innerCallData],
     });
 
     console.log('[Payment] Encoded call data:', callData);
