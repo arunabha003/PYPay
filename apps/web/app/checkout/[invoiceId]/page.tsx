@@ -150,7 +150,8 @@ export default function CheckoutPage() {
             },
             body: JSON.stringify({
               smartAccount: address,
-              sessionPubKey: sessionKey.publicKey,
+              // Contract expects hashing of 64-byte ECDSA public key, not address
+              sessionPubKey: (sessionKey as any).ecdsaPublicKey || sessionKey.publicKey,
               validUntil: Math.floor(sessionKey.validUntil / 1000), // Convert to seconds
               policyId: sessionKey.policyId,
             }),

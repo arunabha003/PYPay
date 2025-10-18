@@ -217,7 +217,7 @@ export async function settleInvoice(
       callData,
       invoiceTuple,
       permitData: '',
-      sessionPubKey: sessionKey.publicKey,
+  sessionPubKey: (sessionKey as any).ecdsaPublicKey || sessionKey.publicKey,
       userOpSignature, // Include the signature
       webauthnAssertion: undefined,
     };
@@ -363,7 +363,7 @@ export async function approvePYUSD(
         memoHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
       }, // Dummy invoice for approval
       permitData: '',
-      sessionPubKey: sessionKey.publicKey,
+  sessionPubKey: (sessionKey as any).ecdsaPublicKey || sessionKey.publicKey,
       userOpSignature, // Include the signature
       webauthnAssertion: undefined,
     };

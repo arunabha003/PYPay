@@ -58,6 +58,7 @@ export function registerRoutes(
     Body: {
       userId: string;
       smartAccount: string;
+      // Expect 64-byte ECDSA public key hex (0x + 128 hex chars), not an address
       sessionPubKey: string;
       validUntil: number;
       policyId: number;
@@ -68,35 +69,26 @@ export function registerRoutes(
       return reply.code(400).send({ error: 'Invalid request', details: validation.error });
     }
 
-    const { userId, smartAccount, sessionPubKey, validUntil, policyId } = validation.data;
+  const { userId, smartAccount, sessionPubKey, validUntil, policyId } = validation.data;
 
     // TODO: Verify user owns this account (check DB)
 
-    // Create attestation hash
-    const attestationHash = keccak256(
-      encodeFunctionData({
-        abi: [
-          {
-            type: 'function',
-            name: 'hash',
-            inputs: [
-              { name: 'account', type: 'address' },
-              { name: 'pubKeyHash', type: 'bytes32' },
-              { name: 'validUntil', type: 'uint48' },
-              { name: 'policyId', type: 'uint8' },
-            ],
-            outputs: [{ type: 'bytes32' }],
-          },
+    // Compute the same digest the contract expects for guardian signature
+    // digest = keccak256("\x19Ethereum Signed Message:\n32" || keccak256(abi.encode(account, pubKeyHash, validUntil, policyId)))
+    const pubKeyHash = keccak256(sessionPubKey as `0x${string}`);
+    const innerHash = keccak256(
+      encodeAbiParameters(
+        [
+          { name: 'account', type: 'address' },
+          { name: 'pubKeyHash', type: 'bytes32' },
+          { name: 'validUntil', type: 'uint48' },
+          { name: 'policyId', type: 'uint8' },
         ],
-        functionName: 'hash',
-        args: [
-          smartAccount as `0x${string}`,
-          keccak256(sessionPubKey as `0x${string}`),
-          validUntil,
-          policyId,
-        ],
-      })
+        [smartAccount as `0x${string}`, pubKeyHash, validUntil, policyId]
+      )
     );
+    const prefix = '\x19Ethereum Signed Message:\n32';
+    const attestationHash = keccak256(concat([toHex(prefix), innerHash]));
 
     // Sign with guardian key
     const guardian = privateKeyToAccount(GUARDIAN_PRIVATE_KEY);
@@ -152,7 +144,19 @@ export function registerRoutes(
         transport: http(chain.rpcUrl),
       });
 
-      // Hash the public key
+      // Validate inputs
+      if (!smartAccount || (smartAccount as string).length !== 42) {
+        return reply.code(400).send({ error: 'Invalid smartAccount address' });
+      }
+      if (typeof sessionPubKey !== 'string' || !sessionPubKey.startsWith('0x')) {
+        return reply.code(400).send({ error: 'sessionPubKey must be 0x-prefixed hex' });
+      }
+      // Expect 64-byte ECDSA public key (128 hex chars after 0x)
+      if ((sessionPubKey as string).length !== 2 + 128) {
+        app.log.warn({ len: (sessionPubKey as string).length }, 'sessionPubKey length unexpected; expected 64 bytes (128 hex chars)');
+      }
+
+      // Hash the ECDSA public key (64 bytes expected)
       const pubKeyHash = keccak256(sessionPubKey as `0x${string}`);
 
       // Create inner hash: keccak256(abi.encode(address(this), pubKeyHash, validUntil, policyId))
@@ -170,7 +174,7 @@ export function registerRoutes(
 
       app.log.info({ pubKeyHash, innerHash }, 'Hashes for session key');
 
-      // Create the final digest with EIP-191 prefix (same as contract does)
+  // Create the final digest with EIP-191 prefix (same as contract does)
       // Contract: keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", innerHash))
       const prefix = '\x19Ethereum Signed Message:\n32';
       const digest = keccak256(concat([toHex(prefix), innerHash]));
@@ -199,6 +203,30 @@ export function registerRoutes(
         },
         transport: http(chain.rpcUrl),
       });
+
+      // Optional: Read guardian from the account to ensure we sign with the correct key
+      try {
+        const onchainGuardian = await publicClient.readContract({
+          address: smartAccount as `0x${string}`,
+          abi: [
+            {
+              type: 'function',
+              name: 'guardian',
+              inputs: [],
+              outputs: [{ type: 'address' }],
+              stateMutability: 'view',
+            },
+          ],
+          functionName: 'guardian',
+          args: [],
+        });
+        const guardianAddress = privateKeyToAccount(GUARDIAN_PRIVATE_KEY).address;
+        if (onchainGuardian.toLowerCase() !== guardianAddress.toLowerCase()) {
+          app.log.warn({ onchainGuardian, signer: guardianAddress }, 'Guardian mismatch between account and relayer key');
+        }
+      } catch (e) {
+        app.log.warn({ e }, 'Could not read guardian from smart account');
+      }
 
       // Call enableSessionKey on the smart account
       const txHash = await walletClient.writeContract({

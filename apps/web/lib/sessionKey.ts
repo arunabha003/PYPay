@@ -8,7 +8,15 @@ const SESSION_KEY_TTL = 30 * 60 * 1000; // 30 minutes
 
 interface SessionKey {
   privateKey: Hex;
+  /**
+   * Ethereum address derived from the session private key (useful for display)
+   */
   publicKey: Address;
+  /**
+   * 64-byte secp256k1 uncompressed public key (without 0x04 prefix), hex-prefixed
+   * This is what the contract expects to hash and validate against in UserOps.
+   */
+  ecdsaPublicKey: Hex;
   validUntil: number;
   policyId: number;
 }
@@ -19,10 +27,16 @@ interface SessionKey {
 export function generateSessionKey(policyId: number = 1): SessionKey {
   const privateKey = generatePrivateKey();
   const account = privateKeyToAccount(privateKey);
+  // account.publicKey is 0x04 || 64-byte XY. Remove 0x04 and re-add 0x prefix
+  const publicKeyFull = account.publicKey; // e.g., 0x04 + 64 bytes
+  const ecdsaPublicKey = (publicKeyFull.startsWith('0x04')
+    ? ('0x' + publicKeyFull.slice(4))
+    : publicKeyFull) as Hex; // ensure 0x + 64-byte
   
   const sessionKey: SessionKey = {
     privateKey,
     publicKey: account.address,
+    ecdsaPublicKey,
     validUntil: Date.now() + SESSION_KEY_TTL,
     policyId,
   };
@@ -32,6 +46,7 @@ export function generateSessionKey(policyId: number = 1): SessionKey {
     sessionStorage.setItem('sessionKey', JSON.stringify({
       privateKey,
       publicKey: account.address,
+      ecdsaPublicKey,
       validUntil: sessionKey.validUntil,
       policyId,
     }));
