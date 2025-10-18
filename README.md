@@ -2,6 +2,19 @@
 
 > A production-ready, multi-chain payment system with passkey authentication, gasless transactions, and cost-optimized routing.
 
+## 📚 Documentation
+
+**🚀 NEW: Complete Setup & Deployment Guide**
+- **[PYPAY_COMPLETE_GUIDE.md](./PYPAY_COMPLETE_GUIDE.md)** - Comprehensive guide with all commands, setup steps, and testnet deployment instructions
+
+**Quick References:**
+- **[QUICK_TESTNET_COMMANDS.md](./QUICK_TESTNET_COMMANDS.md)** - Fast reference for testnet deployment
+- **[TESTNET_DEPLOYMENT_GUIDE.md](./TESTNET_DEPLOYMENT_GUIDE.md)** - Detailed testnet deployment walkthrough
+- **[ANVIL_FORK_BUG_ANALYSIS.md](./ANVIL_FORK_BUG_ANALYSIS.md)** - Technical analysis of known Anvil issue
+- **[TECHNICAL_REFERENCE.md](./TECHNICAL_REFERENCE.md)** - API and architecture reference
+
+**Status:** 95% Complete - Production ready for testnet deployment!
+
 ## ✨ What is PyPay?
 
 PyPay is a revolutionary PYUSD checkout system that eliminates traditional Web3 friction:
