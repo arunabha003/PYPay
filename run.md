@@ -42,8 +42,8 @@ forge script script/DeployMockPYUSD.s.sol --rpc-url http://localhost:8546 --broa
 
 
 # Save deployed PYUSD token addresses
-export PYUSD_ARBSEPOLIA=0x287Fe260A1a839Aae5885b18b7BF32505c51c3E1
-export PYUSD_SEPOLIA=0xfc9e760FA43981D0774D9Ec8C9b14cd309D34618
+export PYUSD_ARBSEPOLIA=0x2ec6622F4Ea3315DB6045d7C4947F63581090568
+export PYUSD_SEPOLIA=0x84cf99d51b54A6251Ba8A0A3A0F725c7e1009d0B
 
 # Mint test PYUSD to deployer on Arbitrum Sepolia
 cast send $PYUSD_ARBSEPOLIA "faucet(uint256)" 10000 \
@@ -263,3 +263,9 @@ cast call $PYUSD_SEPOLIA \
   $SMART_ACCOUNT_SEPOLIA \
   $CHECKOUT_SEPOLIA \
   --rpc-url $SEPOLIA_RPC
+
+
+
+
+#EXTRA  
+cast call 0x07150543b2F1fda0de261E80f6C1e75EE6046aDf "getAddress(address,address,uint256)" 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 0 --rpc-url http://localhost:8545

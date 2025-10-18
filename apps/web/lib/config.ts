@@ -45,7 +45,7 @@ export function getChains(): ChainConfig[] {
       rpcUrl: process.env.NEXT_PUBLIC_ETHEREUM_SEPOLIA_RPC || 'http://localhost:8546',
       bundlerRpc: process.env.NEXT_PUBLIC_BUNDLER_RPC_SEPOLIA || 'https://public.pimlico.io/v2/11155111/rpc',
       explorerUrl: 'https://sepolia.etherscan.io',
-      pyusdAddress: (process.env.NEXT_PUBLIC_PYUSD_SEPOLIA || '0x287Fe260A1a839Aae5885b18b7BF32505c51c3E1') as Address,
+      pyusdAddress: (process.env.NEXT_PUBLIC_PYUSD_SEPOLIA || '0x84cf99d51b54A6251Ba8A0A3A0F725c7e1009d0B') as Address,
       permit2Address: (process.env.NEXT_PUBLIC_PERMIT2_SEPOLIA || '0x000000000022D473030F116dDEE9F6B43aC78BA3') as Address,
       entryPointAddress: (process.env.NEXT_PUBLIC_ENTRYPOINT_SEPOLIA || '0x0000000071727De22E5E9d8BAf0edAc6f37da032') as Address,
       contracts: {

@@ -86,8 +86,29 @@ contract TapKitAccount is ERC4337 {
             )
         );
 
-        if (!SignatureCheckerLib.isValidSignatureNowCalldata(guardian, digest, guardianSignature))
-        {
+        // Handle EOF marker issue: if guardian has small code size (like EOF marker),
+        // assume it's an EOA and use ecrecover directly instead of SignatureCheckerLib
+        bool signatureValid;
+        if (guardian.code.length > 0 && guardian.code.length < 100) {
+            // Likely an EOA with EOF marker - use ecrecover directly
+            if (guardianSignature.length == 65) {
+                bytes32 r;
+                bytes32 s;
+                uint8 v;
+                assembly {
+                    r := calldataload(guardianSignature.offset)
+                    s := calldataload(add(guardianSignature.offset, 0x20))
+                    v := byte(0, calldataload(add(guardianSignature.offset, 0x40)))
+                }
+                address recovered = ecrecover(digest, v, r, s);
+                signatureValid = (recovered == guardian && recovered != address(0));
+            }
+        } else {
+            // Use SignatureCheckerLib for contracts or when we're sure it's an EOA
+            signatureValid = SignatureCheckerLib.isValidSignatureNowCalldata(guardian, digest, guardianSignature);
+        }
+
+        if (!signatureValid) {
             revert InvalidGuardian();
         }
 
