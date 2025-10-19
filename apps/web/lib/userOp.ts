@@ -40,19 +40,28 @@ export function getUserOpHash(
   entryPoint: Address,
   chainId: number
 ): Hex {
-  // Pack userOp fields (excluding signature)
+  // ERC-4337 v0.7: Pack gas limits into bytes32
+  // accountGasLimits = verificationGasLimit (128 bits) | callGasLimit (128 bits)
+  const accountGasLimits = 
+    (BigInt(userOp.verificationGasLimit) << 128n) | 
+    BigInt(userOp.callGasLimit);
+  
+  // gasFees = maxPriorityFeePerGas (128 bits) | maxFeePerGas (128 bits)
+  const gasFees = 
+    (BigInt(userOp.maxPriorityFeePerGas) << 128n) | 
+    BigInt(userOp.maxFeePerGas);
+
+  // Pack userOp fields (ERC-4337 v0.7 format with packed gas)
   const packedUserOp = encodeAbiParameters(
-    parseAbiParameters('address, uint256, bytes32, bytes32, uint256, uint256, uint256, uint256, uint256, bytes32'),
+    parseAbiParameters('address, uint256, bytes32, bytes32, bytes32, uint256, bytes32, bytes32'),
     [
       userOp.sender,
       BigInt(userOp.nonce),
       keccak256(userOp.initCode || '0x'),
       keccak256(userOp.callData),
-      BigInt(userOp.callGasLimit),
-      BigInt(userOp.verificationGasLimit),
+      toHex(accountGasLimits, { size: 32 }) as `0x${string}`, // bytes32
       BigInt(userOp.preVerificationGas),
-      BigInt(userOp.maxFeePerGas),
-      BigInt(userOp.maxPriorityFeePerGas),
+      toHex(gasFees, { size: 32 }) as `0x${string}`, // bytes32
       keccak256(userOp.paymasterAndData || '0x'),
     ]
   );
@@ -100,13 +109,59 @@ export async function signUserOpWithSessionKey(
     validForSeconds: validUntil - now 
   });
 
-  // Get hash to sign (ERC-4337 standard UserOp hash)
-  const userOpHash = getUserOpHash(userOp, entryPoint, chainId);
-  console.log('[UserOp] UserOpHash to sign:', userOpHash);
+  // Create EIP-712 typed data to sign (matching TapKitAccount's __hashTypedData)
+  const domain = {
+    name: 'TapKitAccount',
+    version: '1.0.0',
+    chainId: BigInt(chainId),
+    verifyingContract: userOp.sender as Address,
+  };
 
-  // Sign with session key (65 bytes: r=32, s=32, v=1)
-  const ecdsaSignature = await sessionKeyAccount.signMessage({
-    message: { raw: userOpHash as `0x${string}` },
+  const types = {
+    Validate: [
+      { name: 'sender', type: 'address' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'initCodeHash', type: 'bytes32' },
+      { name: 'callDataHash', type: 'bytes32' },
+      { name: 'accountGasLimits', type: 'bytes32' },
+      { name: 'preVerificationGas', type: 'uint256' },
+      { name: 'gasFees', type: 'bytes32' },
+      { name: 'paymasterAndDataHash', type: 'bytes32' },
+      { name: 'validUntil', type: 'uint48' },
+      { name: 'validAfter', type: 'uint48' },
+    ],
+  };
+
+  // Pack gas limits (v0.7 format)
+  const accountGasLimits = 
+    (BigInt(userOp.verificationGasLimit) << 128n) | 
+    BigInt(userOp.callGasLimit);
+  
+  const gasFees = 
+    (BigInt(userOp.maxPriorityFeePerGas) << 128n) | 
+    BigInt(userOp.maxFeePerGas);
+
+  const message = {
+    sender: userOp.sender,
+    nonce: BigInt(userOp.nonce),
+    initCodeHash: keccak256(userOp.initCode || '0x'),
+    callDataHash: keccak256(userOp.callData),
+    accountGasLimits: toHex(accountGasLimits, { size: 32 }),
+    preVerificationGas: BigInt(userOp.preVerificationGas),
+    gasFees: toHex(gasFees, { size: 32 }),
+    paymasterAndDataHash: keccak256(userOp.paymasterAndData || '0x'),
+    validUntil: BigInt(validUntil),
+    validAfter: BigInt(validAfter),
+  };
+
+  console.log('[UserOp] EIP-712 message:', message);
+
+  // Sign with session key using EIP-712
+  const ecdsaSignature = await sessionKeyAccount.signTypedData({
+    domain,
+    types,
+    primaryType: 'Validate',
+    message,
   });
   console.log('[UserOp] ECDSA signature:', ecdsaSignature);
 
