@@ -120,8 +120,8 @@ contract TapKitPaymaster is Ownable {
 
         // Try to decode as execute(address,uint256,bytes)
         if (bytes4(userOp.callData[:4]) == bytes4(keccak256("execute(address,uint256,bytes)"))) {
-            (, target,, innerCallData) = abi.decode(
-                userOp.callData[4:], (bytes4, address, uint256, bytes)
+            (target,, innerCallData) = abi.decode(
+                userOp.callData[4:], (address, uint256, bytes)
             );
         } else {
             // Direct call - treat userOp.sender as target

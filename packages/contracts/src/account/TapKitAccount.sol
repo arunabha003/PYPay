@@ -38,8 +38,9 @@ contract TapKitAccount is ERC4337 {
         0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
 
     /// @dev EIP712 typehash for user operation validation
+    /// keccak256("Validate(address sender,uint256 nonce,bytes32 initCodeHash,bytes32 callDataHash,bytes32 accountGasLimits,uint256 preVerificationGas,bytes32 gasFees,bytes32 paymasterAndDataHash,uint48 validUntil,uint48 validAfter)")
     bytes32 internal constant _VALIDATE_TYPEHASH =
-        0xa9a214c6f6d90f71d094504e32920cfd4d8d53e5d7cf626f9a26c88af60081c7;
+        0xec47f68185b616716eab508f2d0081af6a3d691ee7c627f4296dec92253979e2;
 
     /// ============ STORAGE ============
 
