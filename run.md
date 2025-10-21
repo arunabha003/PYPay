@@ -20,6 +20,12 @@ export DEPLOYER_PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3f
 export PAYMASTER_OWNER_PRIVATE_KEY=0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6
 export ENTRYPOINT=0x0000000071727De22E5E9d8BAf0edAc6f37da032
 
+# Deploy Mock PYUSD token to Arbitrum Sepolia
+forge script script/DeployMockPYUSD.s.sol --rpc-url http://localhost:8545 --broadcast
+
+# Deploy Mock PYUSD token to Ethereum Sepolia
+forge script script/DeployMockPYUSD.s.sol --rpc-url http://localhost:8546 --broadcast
+
 
 # Deploy all core contracts to Arbitrum Sepolia
 forge script script/Deploy.s.sol \
@@ -33,17 +39,11 @@ forge script script/Deploy.s.sol \
 
 
 
-# Deploy Mock PYUSD token to Arbitrum Sepolia
-forge script script/DeployMockPYUSD.s.sol --rpc-url http://localhost:8545 --broadcast
-
-# Deploy Mock PYUSD token to Ethereum Sepolia
-forge script script/DeployMockPYUSD.s.sol --rpc-url http://localhost:8546 --broadcast
-
-
 
 # Save deployed PYUSD token addresses
-export PYUSD_ARBSEPOLIA=0x2ec6622F4Ea3315DB6045d7C4947F63581090568
-export PYUSD_SEPOLIA=0x84cf99d51b54A6251Ba8A0A3A0F725c7e1009d0B
+export PYUSD_SEPOLIA=0xa45Ec65FaDB8AE3b61b330906123644f1aef544c
+export PYUSD_ARBSEPOLIA=0x3524E03B46e05Df7c6ba9836D04DBFAB409c03d1
+
 
 # Mint test PYUSD to deployer on Arbitrum Sepolia
 cast send $PYUSD_ARBSEPOLIA "faucet(uint256)" 10000 \
@@ -63,8 +63,8 @@ forge script script/StakePaymaster.s.sol --rpc-url http://localhost:8545 --broad
 forge script script/StakePaymaster.s.sol --rpc-url http://localhost:8546 --broadcast
 
 # Save deployed paymaster addresses
-export PAYMASTER_ARBSEPOLIA=0x9a81C9fAddbcBfB565cccdc47A04013aD55695b9
-export PAYMASTER_SEPOLIA=0x1E08F7089D6c7BCCd6e1bedd2a77E3D8C35bd66F
+export PAYMASTER_ARBSEPOLIA=0x2ec6622F4Ea3315DB6045d7C4947F63581090568
+export PAYMASTER_SEPOLIA=0x115F7e5F5A3bcC297718c5805cC0a08Fa9b9c735
 
 # Deposit 2 ETH to paymaster on Arbitrum Sepolia (operational funds for gas)
 cast send $ENTRYPOINT \
@@ -98,8 +98,8 @@ forge script script/CreateStandaloneAccount.s.sol:CreateStandaloneAccount \
 
 
 # Save created smart account addresses
-export SMART_ACCOUNT_SEPOLIA=0x1e156425F0a023ffD2E6574aB3c3Eac4862A4D08
-export SMART_ACCOUNT_ARBSEPOLIA=0xB8F4Ae6bf15a05171A25cFcD1D0C64b056D50577
+export SMART_ACCOUNT_ARBSEPOLIA=0xF3f2F0f75175B5ed7f1247c8D1B9FE7D166EE31c
+export SMART_ACCOUNT_SEPOLIA=0x83D19C27b759F8ba11D2707CCBe1178B567d06c4
 export OWNER=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
 export GUARDIAN=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
 
