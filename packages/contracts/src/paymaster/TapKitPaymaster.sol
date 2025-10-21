@@ -34,6 +34,9 @@ contract TapKitPaymaster is Ownable {
     /// @dev Function selector for Checkout.settle
     bytes4 internal constant SETTLE_SELECTOR = bytes4(keccak256("settle((bytes32,address,uint256,uint64,uint256,bytes32),address,bytes)"));
 
+    /// @dev Function selector for BridgeEscrow.lock
+    bytes4 internal constant LOCK_SELECTOR = bytes4(keccak256("lock(bytes32,uint256)"));
+
     /// ============ STRUCTS ============
 
     /// @dev The packed ERC4337 userOp struct (0.7)
@@ -62,6 +65,7 @@ contract TapKitPaymaster is Ownable {
     /// ============ IMMUTABLES ============
 
     address public immutable checkoutContract;
+    address public immutable bridgeEscrowContract;
     address public immutable merchantRegistry;
     address public immutable pyusdToken;
 
@@ -75,16 +79,19 @@ contract TapKitPaymaster is Ownable {
     constructor(
         address _owner,
         address _checkoutContract,
+        address _bridgeEscrowContract,
         address _merchantRegistry,
         address _pyusdToken,
         uint256 _maxAmountPerTx
     ) payable {
         require(_checkoutContract != address(0), "Invalid checkout");
+        require(_bridgeEscrowContract != address(0), "Invalid bridge escrow");
         require(_merchantRegistry != address(0), "Invalid registry");
         require(_pyusdToken != address(0), "Invalid token");
 
         _initializeOwner(_owner);
         checkoutContract = _checkoutContract;
+        bridgeEscrowContract = _bridgeEscrowContract;
         merchantRegistry = _merchantRegistry;
         pyusdToken = _pyusdToken;
         maxAmountPerTx = _maxAmountPerTx;
@@ -118,7 +125,7 @@ contract TapKitPaymaster is Ownable {
         address target;
         bytes memory innerCallData;
 
-        // Try to decode as execute(address,uint256,bytes)
+                // Try to decode as execute(address,uint256,bytes)
         if (bytes4(userOp.callData[:4]) == bytes4(keccak256("execute(address,uint256,bytes)"))) {
             (target,, innerCallData) = abi.decode(
                 userOp.callData[4:], (address, uint256, bytes)
@@ -129,33 +136,58 @@ contract TapKitPaymaster is Ownable {
             innerCallData = userOp.callData;
         }
 
-        // Verify target is Checkout contract
-        if (target != checkoutContract) revert InvalidTarget();
+        // Verify target is either Checkout or BridgeEscrow contract
+        if (target != checkoutContract && target != bridgeEscrowContract) revert InvalidTarget();
 
-        // Verify function is settle
+        // Verify function is either settle or lock
         if (innerCallData.length < 4) revert InvalidFunction();
         
         bytes4 selector;
         assembly {
             selector := mload(add(innerCallData, 32))
         }
-        if (selector != SETTLE_SELECTOR) {
+        
+        // Allow settle (Checkout) or lock (BridgeEscrow)
+        if (selector != SETTLE_SELECTOR && selector != LOCK_SELECTOR) {
             revert InvalidFunction();
         }
 
-        // Decode invoice tuple from settle callData (skip first 4 bytes for selector)
-        bytes memory invoiceData = new bytes(innerCallData.length - 4);
-        for (uint256 i = 0; i < invoiceData.length; i++) {
-            invoiceData[i] = innerCallData[i + 4];
+        // For settle calls, validate invoice
+        if (selector == SETTLE_SELECTOR) {
+            // Decode invoice tuple from settle callData (skip first 4 bytes for selector)
+            bytes memory invoiceData = new bytes(innerCallData.length - 4);
+            for (uint256 i = 0; i < invoiceData.length; i++) {
+                invoiceData[i] = innerCallData[i + 4];
+            }
+            
+            // Decode to get invoice details (first tuple in callData)
+            (InvoiceTuple memory invoice,,) =
+                abi.decode(invoiceData, (InvoiceTuple, address, bytes));
+            
+            // Validate merchant is active
+            (bool success, bytes memory data) = merchantRegistry.staticcall(
+                abi.encodeWithSignature("isActive(address)", invoice.merchant)
+            );
+            require(success && data.length > 0, "Registry call failed");
+            bool isActive = abi.decode(data, (bool));
+            if (!isActive) revert InactiveMerchant();
+            
+            // Validate invoice not expired
+            if (block.timestamp > invoice.expiry) revert InvoiceExpired();
+            
+            // Validate amount within limits
+            if (invoice.amount == 0 || invoice.amount > maxAmountPerTx) revert InvalidAmount();
+            
+            // Validate chainId matches current chain
+            if (invoice.chainId != block.chainid) revert InvalidAmount();
+            
+            // Prepare context (invoiceId for postOp)
+            context = abi.encode(invoice.invoiceId, invoice.merchant, invoice.amount);
+        } else {
+            // For bridge lock calls, no validation needed (permissionless bridging)
+            // Empty context for bridge operations
+            context = "";
         }
-        (InvoiceTuple memory invoice,,) =
-            abi.decode(invoiceData, (InvoiceTuple, address, bytes));
-
-        // Validate invoice
-        _validateInvoice(invoice);
-
-        // Prepare context (invoiceId for postOp)
-        context = abi.encode(invoice.invoiceId, invoice.merchant, invoice.amount);
 
         // Return validation data with time bounds
         validationData = _packValidationData(true, validUntil, validAfter);

@@ -90,7 +90,7 @@ contract DeployScript is Script {
 
         console2.log("Deploying TapKitPaymaster...");
         TapKitPaymaster paymaster = new TapKitPaymaster(
-            PAYMASTER_OWNER, address(checkout), address(registry), PYUSD, MAX_AMOUNT_PER_TX
+            PAYMASTER_OWNER, address(checkout), address(bridgeEscrow), address(registry), PYUSD, MAX_AMOUNT_PER_TX
         );
         console2.log("TapKitPaymaster deployed at:", address(paymaster));
 
