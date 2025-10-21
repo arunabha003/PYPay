@@ -41,7 +41,7 @@ forge script script/Deploy.s.sol \
 
 
 # Save deployed PYUSD token addresses
-export PYUSD_SEPOLIA=0xa45Ec65FaDB8AE3b61b330906123644f1aef544c
+export PYUSD_SEPOLIA=0xa5585D2EDF0f96f460D1955381267fC2cb5a430d
 export PYUSD_ARBSEPOLIA=0x3524E03B46e05Df7c6ba9836D04DBFAB409c03d1
 
 
@@ -64,7 +64,7 @@ forge script script/StakePaymaster.s.sol --rpc-url http://localhost:8546 --broad
 
 # Save deployed paymaster addresses
 export PAYMASTER_ARBSEPOLIA=0x2ec6622F4Ea3315DB6045d7C4947F63581090568
-export PAYMASTER_SEPOLIA=0x115F7e5F5A3bcC297718c5805cC0a08Fa9b9c735
+export PAYMASTER_SEPOLIA=0xb792cC6F4cC1514cF0fFF3e6cA559D287be2139C
 
 # Deposit 2 ETH to paymaster on Arbitrum Sepolia (operational funds for gas)
 cast send $ENTRYPOINT \
@@ -99,7 +99,7 @@ forge script script/CreateStandaloneAccount.s.sol:CreateStandaloneAccount \
 
 # Save created smart account addresses
 export SMART_ACCOUNT_ARBSEPOLIA=0xF3f2F0f75175B5ed7f1247c8D1B9FE7D166EE31c
-export SMART_ACCOUNT_SEPOLIA=0x83D19C27b759F8ba11D2707CCBe1178B567d06c4
+export SMART_ACCOUNT_SEPOLIA=0x67bDBAfAa09C5c172D336aAbD1ECe61b6296Ef4f
 export OWNER=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
 export GUARDIAN=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
 
@@ -123,13 +123,7 @@ cast send $PYUSD_ARBSEPOLIA \
   --rpc-url $ARBITRUM_SEPOLIA_RPC \
   --private-key $DEPLOYER_PRIVATE_KEY
 
-# Mint 5000 PYUSD to smart account on Ethereum Sepolia
-cast send $PYUSD_SEPOLIA \
-  "mint(address,uint256)" \
-  $SMART_ACCOUNT_SEPOLIA \
-  5000000000 \
-  --rpc-url $SEPOLIA_RPC \
-  --private-key $DEPLOYER_PRIVATE_KEY
+
 
 
 # Approve Checkout to spend PYUSD from smart account on Arbitrum Sepolia
@@ -144,6 +138,35 @@ forge script script/ApproveCheckout.s.sol:ApproveCheckout \
   --broadcast \
   -vvvv
 
+# Approve BridgeEscrow to spend PYUSD from smart account on Arbitrum Sepolia
+forge script script/ApproveBridge.s.sol:ApproveBridge \
+  --rpc-url $ARBITRUM_SEPOLIA_RPC \
+  --broadcast \
+  -vvvv
+
+# Approve BridgeEscrow to spend PYUSD from smart account on Ethereum Sepolia
+forge script script/ApproveBridge.s.sol:ApproveBridge \
+  --rpc-url $SEPOLIA_RPC \
+  --broadcast \
+  -vvvv
+
+
+
+# === BRIDGE SETUP ===
+
+# Fund BridgeEscrow on Arbitrum Sepolia with inventory and transfer ownership
+export PYUSD_ADDRESS=0x3524E03B46e05Df7c6ba9836D04DBFAB409c03d1
+export BRIDGE_ESCROW_ADDRESS=0x07150543b2F1fda0de261E80f6C1e75EE6046aDf
+export RELAYER_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+export OWNER_PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
+forge script script/FundBridgeInventory.s.sol --rpc-url http://localhost:8545 --broadcast
+
+# Fund BridgeEscrow on Ethereum Sepolia with inventory and transfer ownership
+export PYUSD_ADDRESS=0xa5585D2EDF0f96f460D1955381267fC2cb5a430d
+export BRIDGE_ESCROW_ADDRESS=0x77D835ac543d6Bb92d98A6D817C30dE00b8CE948
+export RELAYER_ADDRESS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+export OWNER_PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
+forge script script/FundBridgeInventory.s.sol --rpc-url http://localhost:8546 --broadcast
 
 
 # Register test merchant on Arbitrum Sepolia
@@ -153,6 +176,17 @@ forge script script/SeedMerchant.s.sol --rpc-url http://localhost:8545 --broadca
 forge script script/SeedMerchant.s.sol --rpc-url http://localhost:8546 --broadcast
 
 
+# Mint 5000 PYUSD to smart account on Ethereum Sepolia
+cast send $PYUSD_SEPOLIA \
+  "mint(address,uint256)" \
+  $SMART_ACCOUNT_SEPOLIA \
+  5000000000 \
+  --rpc-url $SEPOLIA_RPC \
+  --private-key $DEPLOYER_PRIVATE_KEY
+
+
+
+  
 # Setup Prisma database schema
 cd apps/indexer
 
