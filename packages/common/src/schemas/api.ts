@@ -51,6 +51,7 @@ export const BridgeQuoteRequestSchema = z.object({
   srcChainId: ChainIdSchema,
   dstChainId: ChainIdSchema,
   amount: z.string().regex(/^\d+$/, 'Amount must be a positive integer string'),
+  recipient: AddressSchema.optional(), // Optional destination chain recipient address
 });
 
 export const BridgeQuoteResponseSchema = z.object({
@@ -67,6 +68,7 @@ export const BridgeLockRequestSchema = z.object({
   srcChainId: ChainIdSchema,
   amount: z.string(),
   payer: AddressSchema,
+  recipient: AddressSchema.optional(), // Optional destination chain recipient address
 });
 
 export const BridgeLockResponseSchema = z.object({

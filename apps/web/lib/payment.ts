@@ -193,9 +193,9 @@ export async function settleInvoice(
       sender: payerAddress,
       nonce: nonce as Hex,
       callData: callData as Hex,
-      callGasLimit: '0x100000' as Hex,
-      verificationGasLimit: '0x100000' as Hex,
-      preVerificationGas: '0x50000' as Hex,
+      callGasLimit: '0x200000' as Hex,
+      verificationGasLimit: '0x200000' as Hex,
+      preVerificationGas: '0x100000' as Hex,
       maxFeePerGas: '0x3B9ACA00' as Hex,
       maxPriorityFeePerGas: '0x3B9ACA00' as Hex,
       paymasterAndData: paymaster as Hex,
@@ -220,6 +220,16 @@ export async function settleInvoice(
   sessionPubKey: (sessionKey as any).ecdsaPublicKey || sessionKey.publicKey,
       userOpSignature, // Include the signature
       webauthnAssertion: undefined,
+      // Pass the exact params used for signing so relayer packs identically
+      nonce,
+      callGasLimit: unsignedUserOp.callGasLimit,
+      verificationGasLimit: unsignedUserOp.verificationGasLimit,
+      preVerificationGas: unsignedUserOp.preVerificationGas,
+      maxFeePerGas: unsignedUserOp.maxFeePerGas,
+      maxPriorityFeePerGas: unsignedUserOp.maxPriorityFeePerGas,
+      // Increase paymaster gas limits to avoid AA95 during validation/postOp
+      paymasterVerificationGasLimit: '0x80000' as Hex,
+      paymasterPostOpGasLimit: '0x80000' as Hex,
     };
     
     const bodyString = stringifyWithBigInt(requestBody);
@@ -334,9 +344,9 @@ export async function approvePYUSD(
       sender: payerAddress,
       nonce: nonce as Hex,
       callData: callData as Hex,
-      callGasLimit: '0x100000' as Hex,
-      verificationGasLimit: '0x100000' as Hex,
-      preVerificationGas: '0x50000' as Hex,
+      callGasLimit: '0x200000' as Hex,
+      verificationGasLimit: '0x200000' as Hex,
+      preVerificationGas: '0x100000' as Hex,
       maxFeePerGas: '0x3B9ACA00' as Hex,
       maxPriorityFeePerGas: '0x3B9ACA00' as Hex,
       paymasterAndData: paymaster as Hex,
@@ -366,6 +376,16 @@ export async function approvePYUSD(
   sessionPubKey: (sessionKey as any).ecdsaPublicKey || sessionKey.publicKey,
       userOpSignature, // Include the signature
       webauthnAssertion: undefined,
+      // Pass the exact params used for signing so relayer packs identically
+      nonce,
+      callGasLimit: unsignedUserOp.callGasLimit,
+      verificationGasLimit: unsignedUserOp.verificationGasLimit,
+      preVerificationGas: unsignedUserOp.preVerificationGas,
+      maxFeePerGas: unsignedUserOp.maxFeePerGas,
+      maxPriorityFeePerGas: unsignedUserOp.maxPriorityFeePerGas,
+      // Increase paymaster gas limits to avoid AA95 during validation/postOp
+      paymasterVerificationGasLimit: '0x80000' as Hex,
+      paymasterPostOpGasLimit: '0x80000' as Hex,
     };
     
     const bodyString = stringifyWithBigInt(requestBody);

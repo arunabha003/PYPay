@@ -102,8 +102,11 @@ export async function initializeBridgeMonitor(
             });
 
             // Call BridgeEscrow.release on destination chain
+            // Use recipient if specified, otherwise fall back to payer (same address)
+            const recipient = bridge.recipient || payer;
+            
             logger.info(
-              { ref, dstChainId: dstChain.chainId, payer },
+              { ref, dstChainId: dstChain.chainId, payer, recipient },
               'Releasing funds on destination chain'
             );
 
@@ -122,7 +125,7 @@ export async function initializeBridgeMonitor(
                 },
               ],
               functionName: 'release',
-              args: [ref, payer, amount],
+              args: [ref, recipient, amount],
             });
 
             logger.info(

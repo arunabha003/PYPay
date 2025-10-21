@@ -25,21 +25,34 @@ export function registerRoutes(
   
   // HMAC authentication hook
   app.addHook('preHandler', async (request, reply) => {
-    // Skip auth for health check and session endpoints (internal use)
-    if (request.url === '/health' || request.url === '/session/enable') return;
+    // Skip auth for health check, session, bridge, and relay endpoints (internal/dev use)
+    if (request.url === '/health' || 
+        request.url === '/session/enable' ||
+        request.url.startsWith('/bridge/') ||
+        request.url.startsWith('/relay/')) return;
 
     const hmacHeader = request.headers['x-hmac-signature'];
     if (!hmacHeader) {
+      app.log.warn({ url: request.url }, 'Missing HMAC signature');
       return reply.code(401).send({ error: 'Missing HMAC signature' });
     }
 
-    const body = JSON.stringify(request.body);
+    // Sort keys alphabetically for deterministic HMAC calculation
+    const sortedKeys = Object.keys(request.body || {}).sort();
+    const sortedObj: any = {};
+    for (const key of sortedKeys) {
+      sortedObj[key] = (request.body as any)[key];
+    }
+    const body = JSON.stringify(sortedObj);
     const expectedHmac = crypto
       .createHmac('sha256', HMAC_SECRET)
       .update(body)
       .digest('hex');
 
+    app.log.info({ body, expectedHmac, receivedHmac: hmacHeader }, 'HMAC verification');
+
     if (hmacHeader !== expectedHmac) {
+      app.log.warn({ expectedHmac, receivedHmac: hmacHeader }, 'Invalid HMAC signature');
       return reply.code(401).send({ error: 'Invalid HMAC signature' });
     }
   });
@@ -129,15 +142,22 @@ export function registerRoutes(
       sessionPubKey: string;
       validUntil: number;
       policyId: number;
+      chainId?: number;
     };
   }>('/session/enable', async (request, reply) => {
     try {
-      const { smartAccount, sessionPubKey, validUntil, policyId } = request.body;
+      const { smartAccount, sessionPubKey, validUntil, policyId, chainId } = request.body;
 
-      app.log.info({ smartAccount, sessionPubKey, validUntil, policyId }, 'Enabling session key');
+      app.log.info({ smartAccount, sessionPubKey, validUntil, policyId, chainId }, 'Enabling session key');
 
       // Find the chain for this account
-      const chain = chains[0]; // For MVP, assume Arbitrum Sepolia
+      const chain = chainId 
+        ? chains.find(c => c.chainId === chainId)
+        : chains[0]; // Default to Arbitrum Sepolia for backwards compatibility
+      
+      if (!chain) {
+        return reply.code(400).send({ error: `Chain ${chainId} not supported` });
+      }
       
       // Create publicClient
       const publicClient = createPublicClient({
@@ -271,6 +291,7 @@ export function registerRoutes(
       srcChainId: number;
       dstChainId: number;
       amount: string;
+      recipient?: string;
     };
   }>('/bridge/quote', async (request, reply) => {
     const validation = BridgeQuoteRequestSchema.safeParse(request.body);
@@ -278,7 +299,7 @@ export function registerRoutes(
       return reply.code(400).send({ error: 'Invalid request', details: validation.error });
     }
 
-    const { srcChainId, dstChainId, amount } = validation.data;
+    const { srcChainId, dstChainId, amount, recipient } = validation.data;
 
     // Check relayer inventory on destination chain
     const dstChain = chains.find((c) => c.chainId === dstChainId);
@@ -326,6 +347,7 @@ export function registerRoutes(
         srcChainId,
         dstChainId,
         payer: '0x0', // Will be updated on lock
+        recipient, // Store destination chain recipient address
         amount,
         status: 'pending',
       },
@@ -348,6 +370,7 @@ export function registerRoutes(
       srcChainId: number;
       amount: string;
       payer: string;
+      recipient?: string;
     };
   }>('/bridge/lock', async (request, reply) => {
     const validation = BridgeLockRequestSchema.safeParse(request.body);
@@ -355,7 +378,7 @@ export function registerRoutes(
       return reply.code(400).send({ error: 'Invalid request', details: validation.error });
     }
 
-    const { ref, srcChainId, amount, payer } = validation.data;
+    const { ref, srcChainId, amount, payer, recipient } = validation.data;
 
     // Get source chain config
     const srcChain = chains.find((c) => c.chainId === srcChainId);
@@ -363,10 +386,13 @@ export function registerRoutes(
       return reply.code(400).send({ error: 'Invalid source chain' });
     }
 
-    // Update bridge with payer
+    // Update bridge with payer and recipient
     await prisma.bridge.update({
       where: { ref },
-      data: { payer: payer.toLowerCase() },
+      data: { 
+        payer: payer.toLowerCase(),
+        recipient: recipient?.toLowerCase(),
+      },
     });
 
     // Return unsigned tx data for BridgeEscrow.lock
@@ -437,6 +463,7 @@ export function registerRoutes(
         args: [smartAccountAddress as `0x${string}`, 0n],
       }) as bigint;
 
+      app.log.info({ smartAccount: smartAccountAddress, nonce: `0x${nonce.toString(16)}` }, 'Returning nonce');
       return reply.send({
         nonce: `0x${nonce.toString(16)}`,
         entryPoint: chain.entryPointAddress,
@@ -462,6 +489,16 @@ export function registerRoutes(
       callData: string;
       userOpSignature?: string;
       webauthnAssertion?: any;
+      // Optional overrides supplied by frontend to ensure signature consistency
+      nonce?: `0x${string}`;
+      callGasLimit?: `0x${string}`;
+      verificationGasLimit?: `0x${string}`;
+      preVerificationGas?: `0x${string}`;
+      maxFeePerGas?: `0x${string}`;
+      maxPriorityFeePerGas?: `0x${string}`;
+      paymasterVerificationGasLimit?: `0x${string}`;
+      paymasterPostOpGasLimit?: `0x${string}`;
+      paymasterData?: `0x${string}`;
     };
   }>('/relay/settle', async (request, reply) => {
     const validation = SettleInvoiceSchema.safeParse(request.body);
@@ -469,7 +506,7 @@ export function registerRoutes(
       return reply.code(400).send({ error: 'Invalid request', details: validation.error });
     }
 
-    const { chainId, smartAccountAddress, callData, userOpSignature } = request.body;
+  const { chainId, smartAccountAddress, callData, userOpSignature } = request.body;
 
     // Require signature - no mocking
     if (!userOpSignature || userOpSignature === '0x') {
@@ -486,30 +523,35 @@ export function registerRoutes(
     }
 
     try {
-      // Fetch current nonce from EntryPoint
+      // Resolve nonce: use provided value (to match signed digest) or fetch current
       const publicClient = createPublicClient({
         transport: http(chain.rpcUrl),
       });
-
-      const nonce = await publicClient.readContract({
-        address: chain.entryPointAddress,
-        abi: [
-          {
-            type: 'function',
-            name: 'getNonce',
-            inputs: [
-              { name: 'sender', type: 'address' },
-              { name: 'key', type: 'uint192' },
-            ],
-            outputs: [{ name: 'nonce', type: 'uint256' }],
-            stateMutability: 'view',
-          },
-        ],
-        functionName: 'getNonce',
-        args: [smartAccountAddress as `0x${string}`, 0n], // key = 0 for default nonce sequence
-      }) as bigint;
-
-      app.log.info({ smartAccount: smartAccountAddress, nonce: nonce.toString() }, 'Fetched nonce');
+      let resolvedNonce: bigint;
+      if (request.body.nonce) {
+        // Strip 0x and parse hex
+        resolvedNonce = BigInt(request.body.nonce);
+      } else {
+        const fetched = await publicClient.readContract({
+          address: chain.entryPointAddress,
+          abi: [
+            {
+              type: 'function',
+              name: 'getNonce',
+              inputs: [
+                { name: 'sender', type: 'address' },
+                { name: 'key', type: 'uint192' },
+              ],
+              outputs: [{ name: 'nonce', type: 'uint256' }],
+              stateMutability: 'view',
+            },
+          ],
+          functionName: 'getNonce',
+          args: [smartAccountAddress as `0x${string}`, 0n], // key = 0 for default nonce sequence
+        }) as bigint;
+        resolvedNonce = fetched;
+      }
+      app.log.info({ smartAccount: smartAccountAddress, nonce: resolvedNonce.toString(), fromClient: request.body.nonce ?? null }, 'Resolved nonce');
 
       // Check if account is deployed
       const accountCode = await publicClient.getBytecode({
@@ -542,19 +584,19 @@ export function registerRoutes(
       // Construct UserOperation for Pimlico v2 (EntryPoint v0.7)
       const userOp = {
         sender: smartAccountAddress as `0x${string}`,
-        nonce: `0x${nonce.toString(16)}`,
+        nonce: `0x${resolvedNonce.toString(16)}`,
         factory: factory,
         factoryData: factoryData,
         callData: callData as `0x${string}`,
-        callGasLimit: `0x${(1000000).toString(16)}`, // 1M gas
-        verificationGasLimit: `0x${(1000000).toString(16)}`,
-        preVerificationGas: `0x${(500000).toString(16)}`,
-        maxFeePerGas: `0x${(1e9).toString(16)}`, // 1 gwei
-        maxPriorityFeePerGas: `0x${(1e9).toString(16)}`,
+        callGasLimit: request.body.callGasLimit ?? `0x${(0x200000).toString(16)}`, // default 2M gas
+        verificationGasLimit: request.body.verificationGasLimit ?? `0x${(0x200000).toString(16)}`,
+        preVerificationGas: request.body.preVerificationGas ?? `0x${(0x100000).toString(16)}`,
+        maxFeePerGas: request.body.maxFeePerGas ?? `0x${(1e9).toString(16)}`, // 1 gwei
+        maxPriorityFeePerGas: request.body.maxPriorityFeePerGas ?? `0x${(1e9).toString(16)}`,
         paymaster: chain.contracts.paymaster,
-        paymasterVerificationGasLimit: `0x${(100000).toString(16)}`,
-        paymasterPostOpGasLimit: `0x${(100000).toString(16)}`,
-        paymasterData: '0x' as `0x${string}`,
+        paymasterVerificationGasLimit: request.body.paymasterVerificationGasLimit ?? `0x${(200000).toString(16)}`,
+        paymasterPostOpGasLimit: request.body.paymasterPostOpGasLimit ?? `0x${(200000).toString(16)}`,
+        paymasterData: (request.body.paymasterData ?? '0x') as `0x${string}`,
         signature: userOpSignature as `0x${string}`,
       };
 
@@ -602,7 +644,21 @@ export function registerRoutes(
           signature: userOp.signature,
         };
 
-        app.log.info({ packedUserOp }, 'Packed UserOp for EntryPoint');
+          // Log unpacked gas params for debugging AA95
+          try {
+            const vgl = BigInt(userOp.verificationGasLimit).toString();
+            const cgl = BigInt(userOp.callGasLimit).toString();
+            const pvgl = BigInt(userOp.paymasterVerificationGasLimit).toString();
+            const ppgl = BigInt(userOp.paymasterPostOpGasLimit).toString();
+            app.log.info({
+              accountGasLimits: `${vgl}/${cgl}`,
+              preVerificationGas: BigInt(userOp.preVerificationGas).toString(),
+              gasFees: `${BigInt(userOp.maxPriorityFeePerGas).toString()}/${BigInt(userOp.maxFeePerGas).toString()}`,
+              paymasterGas: `${pvgl}/${ppgl}`,
+            }, 'Gas parameters');
+          } catch {}
+
+          app.log.info({ packedUserOp }, 'Packed UserOp for EntryPoint');
 
         // Call EntryPoint.handleOps directly
         try {
