@@ -26,13 +26,15 @@ contract ApproveBridge is Script {
         
         string memory accountKey = string.concat("SMART_ACCOUNT_", suffix);
         string memory pyusdKey = string.concat("PYUSD_", suffix);
+        string memory bridgeEscrowKey = string.concat("BRIDGE_ESCROW_", suffix);
         
         address smartAccount = vm.envAddress(accountKey);
         address pyusd = vm.envAddress(pyusdKey);
-        address bridgeEscrow = 0x07150543b2F1fda0de261E80f6C1e75EE6046aDf; // Same on both chains
+        address bridgeEscrow = vm.envAddress(bridgeEscrowKey);
         
         require(smartAccount != address(0), "Smart account address not set");
         require(pyusd != address(0), "PYUSD address not set");
+        require(bridgeEscrow != address(0), "BridgeEscrow address not set");
         
         console2.log("\n=== Approval Configuration ===");
         console2.log("Smart Account:", smartAccount);

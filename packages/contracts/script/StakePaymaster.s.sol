@@ -12,7 +12,7 @@ contract StakePaymasterScript is Script {
         string memory suffix = _chainSuffix();
         string memory paymasterKey = string.concat("PAYMASTER_", suffix);
         address paymasterAddress = vm.envAddress(paymasterKey);
-        uint256 stakeAmount = 1 ether;
+        uint256 stakeAmount = 0.01 ether;
         try vm.envUint("STAKE_AMOUNT") returns (uint256 amount) {
             stakeAmount = amount;
         } catch {
