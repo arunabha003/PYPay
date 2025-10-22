@@ -193,8 +193,8 @@ export async function settleInvoice(
       sender: payerAddress,
       nonce: nonce as Hex,
       callData: callData as Hex,
-      callGasLimit: '0x200000' as Hex,
-      verificationGasLimit: '0x200000' as Hex,
+      callGasLimit: '0x200000' as Hex, // 2M gas for settlement
+      verificationGasLimit: '0x200000' as Hex, // 2M gas for session key verification
       preVerificationGas: '0x100000' as Hex,
       maxFeePerGas: '0x3B9ACA00' as Hex,
       maxPriorityFeePerGas: '0x3B9ACA00' as Hex,
@@ -344,8 +344,8 @@ export async function approvePYUSD(
       sender: payerAddress,
       nonce: nonce as Hex,
       callData: callData as Hex,
-      callGasLimit: '0x200000' as Hex,
-      verificationGasLimit: '0x200000' as Hex,
+      callGasLimit: '0x200000' as Hex, // 2M gas for approval
+      verificationGasLimit: '0x200000' as Hex, // 2M gas for session key verification
       preVerificationGas: '0x100000' as Hex,
       maxFeePerGas: '0x3B9ACA00' as Hex,
       maxPriorityFeePerGas: '0x3B9ACA00' as Hex,
