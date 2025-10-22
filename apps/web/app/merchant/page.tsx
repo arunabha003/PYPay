@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useAccount } from 'wagmi';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
 
 const INDEXER_URL = process.env.NEXT_PUBLIC_INDEXER_URL || 'http://localhost:3001';
 
@@ -17,32 +19,63 @@ interface Invoice {
 }
 
 export default function MerchantDashboard() {
+  const { address: merchantAddress, isConnected } = useAccount();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [selectedChain, setSelectedChain] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
 
-  // Test merchant address from setup - in production, get from auth
-  const merchantAddress = '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65';
-
   useEffect(() => {
-    fetchInvoices();
-  }, [selectedChain, statusFilter]);
+    if (isConnected && merchantAddress) {
+      fetchInvoices();
+    }
+  }, [selectedChain, statusFilter, merchantAddress, isConnected]);
 
   const fetchInvoices = async () => {
+    if (!merchantAddress) {
+      setInvoices([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       const params = new URLSearchParams();
       if (selectedChain !== 'all') params.append('chainId', selectedChain);
       if (statusFilter !== 'all') params.append('status', statusFilter);
 
-      const response = await fetch(
-        `${INDEXER_URL}/merchant/${merchantAddress}/invoices?${params}`
-      );
-      const data = await response.json();
-      setInvoices(data.invoices || []);
+      const url = `${INDEXER_URL}/merchant/${merchantAddress}/invoices?${params}`;
+      console.log('[Merchant Dashboard] Fetching invoices from:', url);
+
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          console.warn('[Merchant Dashboard] Response not OK:', response.status, response.statusText);
+          // If merchant not found or no invoices, just show empty state
+          setInvoices([]);
+          return;
+        }
+
+        const data = await response.json();
+        console.log('[Merchant Dashboard] Received data:', data);
+        setInvoices(data.invoices || []);
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          console.warn('[Merchant Dashboard] Fetch timeout - indexer may not be running');
+        } else {
+          throw fetchError;
+        }
+      }
     } catch (error) {
-      console.error('Failed to fetch invoices:', error);
+      console.error('[Merchant Dashboard] Failed to fetch invoices:', error);
+      // Silently fail and show empty state - merchant can still create invoices
       setInvoices([]);
     } finally {
       setLoading(false);
@@ -57,22 +90,81 @@ export default function MerchantDashboard() {
     return chainId === 421614 ? 'Arbitrum Sepolia' : 'Ethereum Sepolia';
   };
 
+  // Show wallet connect prompt if not connected
+  if (!isConnected) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-16 text-center">
+          <div className="w-24 h-24 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-full flex items-center justify-center mx-auto mb-8">
+            <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+            </svg>
+          </div>
+          <h1 className="text-4xl font-bold mb-4 text-gray-900">Welcome to PyPay Merchant Portal</h1>
+          <p className="text-gray-600 text-lg mb-10 max-w-xl mx-auto">
+            Connect your wallet to access your merchant dashboard, create invoices, and manage payments.
+          </p>
+          <div className="flex justify-center">
+            <ConnectButton />
+          </div>
+          <div className="mt-12 grid md:grid-cols-3 gap-6 text-left">
+            <div className="bg-blue-50 p-6 rounded-xl border border-blue-100">
+              <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <h3 className="font-bold text-lg mb-2">Create Invoices</h3>
+              <p className="text-gray-600 text-sm">Generate payment requests with QR codes for customers</p>
+            </div>
+            <div className="bg-green-50 p-6 rounded-xl border border-green-100">
+              <div className="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </div>
+              <h3 className="font-bold text-lg mb-2">Track Payments</h3>
+              <p className="text-gray-600 text-sm">Monitor all transactions in real-time across chains</p>
+            </div>
+            <div className="bg-purple-50 p-6 rounded-xl border border-purple-100">
+              <div className="w-12 h-12 bg-purple-600 rounded-lg flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <h3 className="font-bold text-lg mb-2">Export Reports</h3>
+              <p className="text-gray-600 text-sm">Download CSV receipts for accounting</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-10">
         <div>
           <h1 className="text-4xl font-bold text-gray-900 mb-2">Merchant Dashboard</h1>
-          <p className="text-gray-600 text-lg">Manage your invoices and view receipts</p>
+          <p className="text-gray-600 text-lg">
+            Manage your invoices and view receipts
+          </p>
+          <p className="text-sm text-gray-500 font-mono mt-1">
+            Connected: {merchantAddress?.slice(0, 6)}...{merchantAddress?.slice(-4)}
+          </p>
         </div>
-        <a
-          href="/merchant/invoices/new"
-          className="inline-flex items-center px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 font-semibold transition shadow-lg hover:shadow-xl"
-        >
-          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Create Invoice
-        </a>
+        <div className="flex items-center gap-4">
+          <a
+            href="/merchant/invoices/new"
+            className="inline-flex items-center px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 font-semibold transition shadow-lg hover:shadow-xl"
+          >
+            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Create Invoice
+          </a>
+          <ConnectButton />
+        </div>
       </div>
 
       <div className="bg-white rounded-lg shadow p-6 mb-6">

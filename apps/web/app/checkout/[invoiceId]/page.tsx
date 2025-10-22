@@ -64,6 +64,7 @@ export default function CheckoutPage() {
   const [error, setError] = useState<string>('');
   const [processing, setProcessing] = useState(false);
   const [paymentTxHash, setPaymentTxHash] = useState<string>('');
+  const [bridgeLockTxHash, setBridgeLockTxHash] = useState<string>(''); // Bridge lock tx on source chain
   const [balanceBeforePayment, setBalanceBeforePayment] = useState<bigint | null>(null);
   const [balanceAfterPayment, setBalanceAfterPayment] = useState<bigint | null>(null);
 
@@ -636,6 +637,9 @@ export default function CheckoutPage() {
       );
 
       console.log('[Bridge] Lock executed, txHash:', lockTxHash);
+      
+      // Store bridge lock transaction hash for display
+      setBridgeLockTxHash(lockTxHash);
 
       // Wait for relayer to detect lock event and release on destination chain
       // Poll bridge status
@@ -999,21 +1003,49 @@ export default function CheckoutPage() {
 
             <div className="bg-gradient-to-br from-gray-50 to-blue-50 rounded-2xl p-8 mb-8 text-left border border-gray-200 shadow-sm">
               <div className="space-y-3">
+                {/* Show bridge lock transaction if bridging was used */}
+                {bridgeLockTxHash && paymentOption.needsBridge && (
+                  <div className="pb-3 border-b border-gray-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-gray-700 font-medium">Bridge Lock Transaction</span>
+                      <span className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded-md font-semibold">
+                        {paymentOption.sourceChainName}
+                      </span>
+                    </div>
+                    <a
+                      href={`${getChainById(paymentOption.sourceChainId!)?.explorerUrl}/tx/${bridgeLockTxHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-purple-600 hover:text-purple-800 font-mono text-xs bg-white px-3 py-1 rounded-lg border border-purple-200 hover:border-purple-300 transition inline-block"
+                    >
+                      {bridgeLockTxHash.slice(0, 10)}...{bridgeLockTxHash.slice(-8)}
+                    </a>
+                  </div>
+                )}
+                
+                {/* Show payment transaction */}
                 {paymentTxHash && (
-                  <div className="flex justify-between items-center pb-3 border-b border-gray-200">
-                    <span className="text-gray-700 font-medium">Transaction Hash</span>
+                  <div className="pb-3 border-b border-gray-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-gray-700 font-medium">
+                        {paymentOption.needsBridge ? 'Settlement Transaction' : 'Transaction Hash'}
+                      </span>
+                      <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-md font-semibold">
+                        {paymentOption.chainName}
+                      </span>
+                    </div>
                     <a
                       href={`${getChainById(invoice.chainId)?.explorerUrl}/tx/${paymentTxHash}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 font-mono text-xs bg-white px-3 py-1 rounded-lg border border-blue-200 hover:border-blue-300 transition"
+                      className="text-blue-600 hover:text-blue-800 font-mono text-xs bg-white px-3 py-1 rounded-lg border border-blue-200 hover:border-blue-300 transition inline-block"
                     >
                       {paymentTxHash.slice(0, 10)}...{paymentTxHash.slice(-8)}
                     </a>
                   </div>
                 )}
                 <div className="flex justify-between py-2">
-                  <span className="text-gray-700 font-medium">Chain</span>
+                  <span className="text-gray-700 font-medium">Payment Chain</span>
                   <span className="font-semibold text-gray-900">{paymentOption.chainName}</span>
                 </div>
                 <div className="flex justify-between py-2 bg-white/60 px-4 rounded-lg">
@@ -1022,40 +1054,22 @@ export default function CheckoutPage() {
                     {(parseInt(invoice.amount) / 1e6).toFixed(2)} PYUSD
                   </span>
                 </div>
-                {balanceBeforePayment !== null && (
-                  <div className="flex justify-between py-2">
-                    <span className="text-gray-700 font-medium">Balance Before</span>
-                    <span className="font-semibold text-gray-900">
-                      {(Number(balanceBeforePayment) / 1e6).toFixed(2)} PYUSD
+                <div className="border-t pt-3 mt-2 space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-700 font-medium">Gas Paid</span>
+                    <span className="font-semibold text-green-600">
+                      ${paymentOption.gasCostUsd.toFixed(4)} (Sponsored)
                     </span>
                   </div>
-                )}
-                {balanceAfterPayment !== null && (
-                  <div className="flex justify-between pt-3 border-t border-gray-200 bg-green-50 -mx-8 px-12 -mb-8 pb-4 rounded-b-2xl">
-                    <span className="text-gray-800 font-bold text-lg">Balance After</span>
-                    <span className="font-bold text-green-600 text-lg">
-                      {(Number(balanceAfterPayment) / 1e6).toFixed(2)} PYUSD
-                    </span>
-                  </div>
-                )}
-                {!balanceAfterPayment && (
-                  <div className="border-t pt-3 mt-2 space-y-2">
+                  {paymentOption.needsBridge && (
                     <div className="flex justify-between">
-                      <span className="text-gray-700 font-medium">Gas Paid</span>
-                      <span className="font-semibold text-green-600">
-                        ${paymentOption.gasCostUsd.toFixed(4)} (Sponsored)
+                      <span className="text-gray-700 font-medium">Bridge Cost</span>
+                      <span className="font-semibold text-gray-900">
+                        ${paymentOption.bridgeCostUsd.toFixed(4)}
                       </span>
                     </div>
-                    {paymentOption.needsBridge && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-700 font-medium">Bridge Cost</span>
-                        <span className="font-semibold text-gray-900">
-                          ${paymentOption.bridgeCostUsd.toFixed(4)}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
 

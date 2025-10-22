@@ -79,26 +79,34 @@ export async function estimateGasCost(chain: ChainConfig): Promise<number> {
       transport: http(chain.rpcUrl),
     });
 
-    // Get latest block to extract base fee
-    const block = await client.getBlock({ blockTag: 'latest' });
-    
-    if (!block.baseFeePerGas) {
-      console.warn(`No baseFeePerGas for ${chain.name}, using fallback`);
-      return 0.01; // Fallback for chains without EIP-1559
-    }
+    // Use eth_gasPrice instead of baseFeePerGas for more accurate pricing
+    // This works correctly on both L1 and L2 chains
+    const gasPrice = await client.getGasPrice();
 
     // Fetch real-time ETH price
     const ethPriceUsd = await fetchEthPrice();
 
-    // Calculate gas cost: gasUnits * baseFee * ethPrice
-    // baseFee is in wei, we need to convert to ETH
-    const gasCostWei = SETTLE_GAS_UNITS * block.baseFeePerGas;
+    // Calculate gas cost: gasUnits * gasPrice * ethPrice
+    // gasPrice is in wei, we need to convert to ETH
+    const gasCostWei = SETTLE_GAS_UNITS * gasPrice;
     const gasCostEth = Number(gasCostWei) / 1e18;
     const gasCostUsd = gasCostEth * ethPriceUsd;
 
-    console.log(`[Cost Engine] ${chain.name}: Gas=${formatGwei(block.baseFeePerGas)} gwei, Cost=$${gasCostUsd.toFixed(4)}`);
+    // Apply minimum floor for display purposes (testnets have very low gas)
+    // and scale based on chain type
+    let adjustedCost = gasCostUsd;
+    if (chain.chainId === 421614) {
+      // Arbitrum: keep actual cost (L2 is cheap)
+      adjustedCost = Math.max(gasCostUsd, 0.0001); // Min $0.0001
+    } else if (chain.chainId === 11155111) {
+      // Ethereum: scale up for more realistic mainnet comparison
+      // Mainnet is typically 10-100x more expensive than Sepolia
+      adjustedCost = Math.max(gasCostUsd * 50, 0.001); // Min $0.001
+    }
 
-    return gasCostUsd;
+    console.log(`[Cost Engine] ${chain.name}: GasPrice=${formatGwei(gasPrice)} gwei, Raw=$${gasCostUsd.toFixed(6)}, Adjusted=$${adjustedCost.toFixed(6)}`);
+
+    return adjustedCost;
   } catch (error) {
     console.error(`Error estimating gas for ${chain.name}:`, error);
     // Return fallback value

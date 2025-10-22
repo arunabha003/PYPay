@@ -1,7 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useAccount } from 'wagmi';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
 import QRCode from 'qrcode';
+
+const INDEXER_URL = process.env.NEXT_PUBLIC_INDEXER_URL || 'http://localhost:3001';
 
 interface Merchant {
   address: string;
@@ -11,46 +15,51 @@ interface Merchant {
   chainId: number;
 }
 
+interface CostQuote {
+  chainId: number;
+  chainName: string;
+  gasSponsorCostUsd: number;
+  estLatencyMs: number;
+  bridgeCostUsd: number;
+  totalCostUsd: number;
+}
+
 export default function CreateInvoice() {
+  const { address: connectedAddress, isConnected } = useAccount();
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   const [expiry, setExpiry] = useState('30');
   const [chainId, setChainId] = useState(421614);
-  const [merchantAddress, setMerchantAddress] = useState('');
-  const [merchants, setMerchants] = useState<Merchant[]>([]);
   const [qrCode, setQRCode] = useState('');
   const [invoiceId, setInvoiceId] = useState('');
   const [txHash, setTxHash] = useState('');
   const [loading, setLoading] = useState(false);
-  const [loadingMerchants, setLoadingMerchants] = useState(true);
   const [error, setError] = useState('');
+  const [costQuotes, setCostQuotes] = useState<CostQuote[]>([]);
+  const [loadingCosts, setLoadingCosts] = useState(false);
 
-  // Fetch registered merchants
+  // Use connected wallet address as merchant
+  const merchantAddress = connectedAddress || '';
+
+  // Fetch real-time gas costs
   useEffect(() => {
-    async function fetchMerchants() {
-      try {
-        setLoadingMerchants(true);
-        const response = await fetch(`/api/merchants?chainId=${chainId}`);
-        if (!response.ok) {
-          throw new Error('Failed to fetch merchants');
-        }
-        const data = await response.json();
-        setMerchants(data.merchants || []);
-        
-        // Auto-select first merchant if available
-        if (data.merchants && data.merchants.length > 0) {
-          setMerchantAddress(data.merchants[0].address);
-        }
-      } catch (err) {
-        console.error('Failed to fetch merchants:', err);
-        setError('Failed to load merchants. Please ensure the indexer is running.');
-      } finally {
-        setLoadingMerchants(false);
-      }
-    }
+    fetchGasCosts();
+  }, []);
 
-    fetchMerchants();
-  }, [chainId]);
+  const fetchGasCosts = async () => {
+    try {
+      setLoadingCosts(true);
+      const response = await fetch(`${INDEXER_URL}/costs/quotes`);
+      if (response.ok) {
+        const quotes = await response.json();
+        setCostQuotes(quotes);
+      }
+    } catch (error) {
+      console.error('Failed to fetch gas costs:', error);
+    } finally {
+      setLoadingCosts(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -145,12 +154,44 @@ export default function CreateInvoice() {
     }
   };
 
+  // Show wallet connect prompt if not connected
+  if (!isConnected) {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-12 text-center">
+          <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <h1 className="text-3xl font-bold mb-4 text-gray-900">Connect Wallet to Create Invoice</h1>
+          <p className="text-gray-600 mb-8 max-w-md mx-auto">
+            Please connect your merchant wallet to create invoices and receive payments.
+          </p>
+          <div className="flex justify-center">
+            <ConnectButton />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-2xl mx-auto">
-      <h1 className="text-3xl font-bold mb-2">Create Invoice</h1>
-      <p className="text-gray-600 mb-8">
-        Generate a payment request with QR code and optional NFC tag
-      </p>
+      {/* Page Title */}
+      <div className="mb-8">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-3xl font-bold mb-2">Create Invoice</h1>
+            <p className="text-gray-600">
+              Generate a payment request with QR code and optional NFC tag
+            </p>
+          </div>
+          <div className="ml-auto" style={{ transform: 'scale(0.85)', transformOrigin: 'top right' }}>
+            <ConnectButton />
+          </div>
+        </div>
+      </div>
 
       {error && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
@@ -162,29 +203,12 @@ export default function CreateInvoice() {
         <form onSubmit={handleSubmit} className="bg-white p-8 rounded-lg shadow-lg">
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Merchant *
+              Merchant Address
             </label>
-            {loadingMerchants ? (
-              <div className="text-gray-500">Loading merchants...</div>
-            ) : merchants.length === 0 ? (
-              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-700 text-sm">
-                No merchants registered on this chain. Please register a merchant first.
-              </div>
-            ) : (
-              <select
-                value={merchantAddress}
-                onChange={(e) => setMerchantAddress(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                required
-              >
-                {merchants.map((merchant) => (
-                  <option key={merchant.address} value={merchant.address}>
-                    {merchant.address} {!merchant.active && '(Inactive)'}
-                  </option>
-                ))}
-              </select>
-            )}
-            <p className="text-sm text-gray-500 mt-1">Select the merchant receiving payment</p>
+            <div className="px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg font-mono text-sm text-gray-700">
+              {merchantAddress}
+            </div>
+            <p className="text-sm text-gray-500 mt-1">Payment will be sent to your connected wallet</p>
           </div>
 
           <div className="mb-6">
@@ -238,17 +262,109 @@ export default function CreateInvoice() {
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Payment Chain *
             </label>
-            <select
-              value={chainId}
-              onChange={(e) => setChainId(parseInt(e.target.value))}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            >
-              <option value={421614}>Arbitrum Sepolia (Recommended - Lower Fees)</option>
-              <option value={11155111}>Ethereum Sepolia</option>
-            </select>
-            <p className="text-sm text-gray-500 mt-1">
-              Buyer can still choose cheapest chain at checkout
-            </p>
+            <div className="space-y-3">
+              {/* Arbitrum Sepolia Option */}
+              <label
+                className={`relative flex items-center justify-between p-4 border-2 rounded-xl cursor-pointer transition ${
+                  chainId === 421614
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="chainId"
+                  value={421614}
+                  checked={chainId === 421614}
+                  onChange={(e) => setChainId(parseInt(e.target.value))}
+                  className="sr-only"
+                />
+                <div className="flex items-center space-x-3">
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                    chainId === 421614 ? 'border-blue-500' : 'border-gray-300'
+                  }`}>
+                    {chainId === 421614 && (
+                      <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-900">Arbitrum Sepolia</p>
+                    <p className="text-xs text-gray-500">Recommended - Lower Fees</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  {loadingCosts ? (
+                    <div className="animate-pulse">
+                      <div className="h-4 w-16 bg-gray-200 rounded"></div>
+                    </div>
+                  ) : (
+                    <>
+                      {costQuotes.find(q => q.chainId === 421614) && (
+                        <>
+                          <p className="text-sm font-bold text-green-600">
+                            ${(costQuotes.find(q => q.chainId === 421614)?.gasSponsorCostUsd || 0) < 0.0001 
+                              ? '<$0.0001' 
+                              : (costQuotes.find(q => q.chainId === 421614)?.gasSponsorCostUsd || 0).toFixed(4)}
+                          </p>
+                          <p className="text-xs text-gray-500">Gas (Sponsored)</p>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+              </label>
+
+              {/* Ethereum Sepolia Option */}
+              <label
+                className={`relative flex items-center justify-between p-4 border-2 rounded-xl cursor-pointer transition ${
+                  chainId === 11155111
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="chainId"
+                  value={11155111}
+                  checked={chainId === 11155111}
+                  onChange={(e) => setChainId(parseInt(e.target.value))}
+                  className="sr-only"
+                />
+                <div className="flex items-center space-x-3">
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                    chainId === 11155111 ? 'border-blue-500' : 'border-gray-300'
+                  }`}>
+                    {chainId === 11155111 && (
+                      <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-900">Ethereum Sepolia</p>
+                    <p className="text-xs text-gray-500">Higher gas costs</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  {loadingCosts ? (
+                    <div className="animate-pulse">
+                      <div className="h-4 w-16 bg-gray-200 rounded"></div>
+                    </div>
+                  ) : (
+                    <>
+                      {costQuotes.find(q => q.chainId === 11155111) && (
+                        <>
+                          <p className="text-sm font-bold text-green-600">
+                            ${(costQuotes.find(q => q.chainId === 11155111)?.gasSponsorCostUsd || 0) < 0.0001 
+                              ? '<$0.0001' 
+                              : (costQuotes.find(q => q.chainId === 11155111)?.gasSponsorCostUsd || 0).toFixed(4)}
+                          </p>
+                          <p className="text-xs text-gray-500">Gas (Sponsored)</p>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+              </label>
+            </div>
           </div>
 
           <button
