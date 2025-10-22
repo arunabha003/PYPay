@@ -64,6 +64,8 @@ export default function CheckoutPage() {
   const [error, setError] = useState<string>('');
   const [processing, setProcessing] = useState(false);
   const [paymentTxHash, setPaymentTxHash] = useState<string>('');
+  const [balanceBeforePayment, setBalanceBeforePayment] = useState<bigint | null>(null);
+  const [balanceAfterPayment, setBalanceAfterPayment] = useState<bigint | null>(null);
 
   // Step 1: Load invoice
   useEffect(() => {
@@ -110,10 +112,15 @@ export default function CheckoutPage() {
 
       setUser(authenticatedUser);
 
-      // Generate a fresh session key for each checkout session
-      // This avoids time-bound conflicts and ensures clean state
-      const sessionKey = generateSessionKey(1);
-      console.log('[Auth] Generated fresh session key for this checkout');
+      // Try to reuse existing session key if valid, otherwise generate a new one
+      // This ensures consistency across the entire checkout flow (bridge + settlement)
+      let sessionKey = getSessionKey();
+      if (!sessionKey) {
+        sessionKey = generateSessionKey(1);
+        console.log('[Auth] Generated fresh session key for this checkout');
+      } else {
+        console.log('[Auth] Reusing existing session key from sessionStorage');
+      }
 
       // Resolve chain for the invoice (default to Arbitrum Sepolia)
       const chainId = (invoice?.chainId as number) || 421614;
@@ -226,6 +233,9 @@ export default function CheckoutPage() {
       );
 
       console.log('[Checkout] Balance on invoice chain:', balanceOnInvoiceChain.toString(), 'Required:', invoiceAmount.toString());
+      
+      // Store balance before payment
+      setBalanceBeforePayment(balanceOnInvoiceChain);
 
       // If sufficient balance on invoice chain, pay directly
       if (balanceOnInvoiceChain >= invoiceAmount) {
@@ -501,6 +511,41 @@ export default function CheckoutPage() {
         }
       }
 
+      // CRITICAL: Enable session key on DESTINATION chain before bridging
+      // The destination chain payment will execute after the bridge completes
+      console.log('[Bridge] Getting smart account address on destination chain...');
+      const { address: destChainAccount, isDeployed: destIsDeployed } = await getOrCreateSmartAccount(
+        TEST_OWNER as any,
+        GUARDIAN_ADDRESS as any,
+        destChain.contracts.accountFactory as any,
+        destChain.rpcUrl,
+        0n
+      );
+
+      console.log('[Bridge] Destination chain account:', destChainAccount);
+
+      // Enable session key on destination chain if account is deployed
+      if (destIsDeployed) {
+        console.log('[Bridge] Enabling session key on destination chain...');
+        try {
+          await fetch(`${RELAYER_URL}/session/enable`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              smartAccount: destChainAccount,
+              sessionPubKey: (sessionKey as any).ecdsaPublicKey || sessionKey.publicKey,
+              validUntil: Math.floor(sessionKey.validUntil / 1000),
+              policyId: sessionKey.policyId,
+              chainId: destChain.chainId, // Specify the destination chain
+            }),
+          });
+          console.log('[Bridge] Session key enabled on destination chain');
+        } catch (err) {
+          console.error('[Bridge] Failed to enable session key on destination chain:', err);
+          throw new Error('Failed to enable session key on destination chain');
+        }
+      }
+
       console.log('[Bridge] Getting bridge quote...', {
         source: sourceChain.name,
         destination: destChain.name,
@@ -672,6 +717,19 @@ export default function CheckoutPage() {
       // Wait a bit for indexer to process
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
+      // Fetch updated balance after payment
+      try {
+        const updatedBalance = await getPYUSDBalance(
+          account as Address,
+          chain.pyusdAddress,
+          chain.rpcUrl
+        );
+        setBalanceAfterPayment(updatedBalance);
+        console.log('[Checkout] Balance after payment:', updatedBalance.toString());
+      } catch (err) {
+        console.error('[Checkout] Failed to fetch balance after payment:', err);
+      }
+
       setStep('success');
       setProcessing(false);
     } catch (error) {
@@ -722,15 +780,19 @@ export default function CheckoutPage() {
   if (step === 'error') {
     return (
       <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-lg shadow-lg p-8 text-center">
-          <div className="text-red-600 text-6xl mb-4">⚠️</div>
-          <h2 className="text-2xl font-bold mb-4 text-red-600">Error</h2>
-          <p className="text-gray-600 mb-6">{error}</p>
+        <div className="bg-white rounded-xl shadow-xl border border-red-200 p-10 text-center">
+          <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg className="w-10 h-10 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold mb-4 text-red-600">Payment Error</h2>
+          <p className="text-gray-700 mb-8 text-lg">{error}</p>
           <a
             href="/"
-            className="inline-block px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+            className="inline-block px-8 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-semibold transition shadow-lg"
           >
-            Go Home
+            Return Home
           </a>
         </div>
       </div>
@@ -740,29 +802,35 @@ export default function CheckoutPage() {
   if (!invoice) return null;
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <div className="bg-white rounded-lg shadow-lg p-8">
-        <h1 className="text-3xl font-bold mb-6">Checkout</h1>
+    <div className="max-w-3xl mx-auto">
+      <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-10">
+        <div className="flex items-center space-x-3 mb-8">
+          <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center">
+            <span className="text-white font-bold text-lg">Py</span>
+          </div>
+          <h1 className="text-4xl font-bold text-gray-900">Checkout</h1>
+        </div>
 
         {/* Invoice Details */}
-        <div className="bg-primary-50 border border-primary-200 p-6 rounded-lg mb-6">
-          <div className="flex justify-between items-start mb-4">
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 p-8 rounded-2xl mb-8 shadow-sm">
+          <div className="flex justify-between items-start mb-6">
             <div>
-              <h3 className="text-sm font-medium text-gray-600 mb-1">Amount</h3>
-              <p className="text-3xl font-bold text-primary-600">
-                {(parseInt(invoice.amount) / 1e6).toFixed(2)} <span className="text-xl">PYUSD</span>
+              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">Payment Amount</h3>
+              <p className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                {(parseInt(invoice.amount) / 1e6).toFixed(2)}
               </p>
+              <p className="text-xl text-gray-600 font-medium mt-1">PYUSD</p>
             </div>
             <div className="text-right">
-              <h3 className="text-sm font-medium text-gray-600 mb-1">Merchant</h3>
-              <p className="font-mono text-sm text-gray-700">
+              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">Merchant</h3>
+              <p className="font-mono text-sm text-gray-800 bg-white px-3 py-2 rounded-lg border border-gray-200">
                 {invoice.merchant.slice(0, 6)}...{invoice.merchant.slice(-4)}
               </p>
             </div>
           </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-600">Expires:</span>
-            <span className="font-medium">
+          <div className="flex justify-between text-sm bg-white/50 px-4 py-3 rounded-lg">
+            <span className="text-gray-700 font-medium">Expires:</span>
+            <span className="font-semibold text-gray-900">
               {new Date(invoice.expiry * 1000).toLocaleString()}
             </span>
           </div>
@@ -770,20 +838,24 @@ export default function CheckoutPage() {
 
         {/* Step 1: Authentication */}
         {step === 'auth' && (
-          <div className="text-center py-8">
-            <div className="text-6xl mb-6">🔐</div>
-            <h2 className="text-2xl font-bold mb-4">Authenticate to Pay</h2>
-            <p className="text-gray-600 mb-8">
-              Use your device's biometrics to securely authenticate
+          <div className="text-center py-10">
+            <div className="w-24 h-24 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg className="w-12 h-12 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <h2 className="text-3xl font-bold mb-4 text-gray-900">Authenticate to Pay</h2>
+            <p className="text-gray-600 mb-10 text-lg max-w-md mx-auto">
+              Use your device's biometrics to securely authenticate and complete payment
             </p>
             <button
               onClick={handleAuth}
               disabled={processing}
-              className="px-8 py-4 bg-primary-600 text-white rounded-lg hover:bg-primary-700 font-medium text-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-10 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 font-semibold text-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
             >
-              {processing ? 'Authenticating...' : '👆 Sign in with Passkey'}
+              {processing ? 'Authenticating...' : 'Sign in with Passkey'}
             </button>
-            <p className="text-sm text-gray-500 mt-4">
+            <p className="text-sm text-gray-500 mt-6">
               No wallet or seed phrase required
             </p>
           </div>
@@ -800,33 +872,43 @@ export default function CheckoutPage() {
 
         {/* Step 3: Bridge */}
         {step === 'bridge' && (
-          <div className="text-center py-8">
-            <div className="text-6xl mb-6">🌉</div>
-            <h2 className="text-2xl font-bold mb-4">Bridging Assets</h2>
-            <p className="text-gray-600 mb-2">
+          <div className="text-center py-10">
+            <div className="w-24 h-24 bg-gradient-to-br from-purple-100 to-pink-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg className="w-12 h-12 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+            </div>
+            <h2 className="text-3xl font-bold mb-4 text-gray-900">Bridging Assets</h2>
+            <p className="text-gray-600 mb-2 text-lg">
               Moving PYUSD from {paymentOption?.sourceChainName} to {paymentOption?.chainName}
             </p>
-            <p className="text-sm text-gray-500 mb-8">
+            <p className="text-base text-gray-500 mb-10">
               Amount: {(parseInt(invoice.amount) / 1e6).toFixed(2)} PYUSD
             </p>
-            <div className="flex justify-center items-center gap-4 mb-8">
-              <div className="w-3 h-3 bg-primary-600 rounded-full animate-bounce"></div>
-              <div className="w-3 h-3 bg-primary-600 rounded-full animate-bounce delay-100"></div>
-              <div className="w-3 h-3 bg-primary-600 rounded-full animate-bounce delay-200"></div>
+            <div className="flex justify-center items-center gap-4 mb-10">
+              <div className="w-4 h-4 bg-purple-600 rounded-full animate-bounce"></div>
+              <div className="w-4 h-4 bg-purple-600 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+              <div className="w-4 h-4 bg-purple-600 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
             </div>
-            <p className="text-sm text-gray-500">This usually takes 10-30 seconds</p>
+            <p className="text-sm text-gray-500 bg-gray-100 inline-block px-6 py-2 rounded-full">
+              This usually takes 10-30 seconds
+            </p>
           </div>
         )}
 
         {/* Step 4: Pay */}
         {step === 'pay' && paymentOption && (
-          <div className="text-center py-8">
-            <div className="text-6xl mb-6">💳</div>
-            <h2 className="text-2xl font-bold mb-4">Confirm Payment</h2>
-            <p className="text-gray-600 mb-2">
-              Paying {(parseInt(invoice.amount) / 1e6).toFixed(2)} PYUSD
+          <div className="text-center py-10">
+            <div className="w-24 h-24 bg-gradient-to-br from-green-100 to-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg className="w-12 h-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+              </svg>
+            </div>
+            <h2 className="text-3xl font-bold mb-4 text-gray-900">Confirm Payment</h2>
+            <p className="text-gray-600 mb-2 text-xl font-semibold">
+              {(parseInt(invoice.amount) / 1e6).toFixed(2)} PYUSD
             </p>
-            <p className="text-sm text-gray-500 mb-6">
+            <p className="text-sm text-gray-500 mb-8">
               on {paymentOption.chainName}
             </p>
 
@@ -835,12 +917,24 @@ export default function CheckoutPage() {
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Payment Chain:</span>
-                  <span className="font-medium">{paymentOption.chainName}</span>
+                  <span className="font-medium text-gray-900">{paymentOption.chainName}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Your Balance:</span>
-                  <span className="font-medium">
-                    {(Number(paymentOption.balance) / 1e6).toFixed(2)} PYUSD
+                  <span className="text-gray-600">Current Balance:</span>
+                  <span className="font-medium text-gray-900">
+                    {(Number(balanceBeforePayment || paymentOption.balance) / 1e6).toFixed(2)} PYUSD
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Payment Amount:</span>
+                  <span className="font-medium text-gray-900">
+                    -{(parseInt(invoice.amount) / 1e6).toFixed(2)} PYUSD
+                  </span>
+                </div>
+                <div className="flex justify-between border-t pt-2">
+                  <span className="text-gray-600">Balance After Payment:</span>
+                  <span className="font-bold text-primary-600">
+                    {((Number(balanceBeforePayment || paymentOption.balance) - parseInt(invoice.amount)) / 1e6).toFixed(2)} PYUSD
                   </span>
                 </div>
                 {paymentOption.needsBridge && (
@@ -878,59 +972,88 @@ export default function CheckoutPage() {
             <button
               onClick={handlePayment}
               disabled={processing}
-              className="px-8 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium text-lg transition disabled:opacity-50"
+              className="px-10 py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 font-semibold text-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl"
             >
-              {processing ? 'Processing Payment...' : '✓ Pay Now'}
+              {processing ? 'Processing Payment...' : 'Confirm & Pay'}
             </button>
-            <p className="text-sm text-gray-500 mt-4">
+            <p className="text-sm text-gray-500 mt-6 bg-blue-50 inline-block px-6 py-2 rounded-full">
               {paymentOption.needsBridge 
                 ? 'Bridging + Payment will complete automatically'
-                : 'No gas fees required'}
+                : 'No gas fees required - fully sponsored'}
             </p>
           </div>
         )}
 
         {/* Step 5: Success */}
         {step === 'success' && paymentOption && (
-          <div className="text-center py-8">
-            <div className="text-green-600 text-6xl mb-6">✅</div>
-            <h2 className="text-2xl font-bold mb-4 text-green-600">Payment Successful!</h2>
-            <p className="text-gray-600 mb-6">
-              Your payment of {invoice ? (parseInt(invoice.amount) / 1e6).toFixed(2) : '0.00'} PYUSD
-              has been processed
+          <div className="text-center py-10">
+            <div className="w-24 h-24 bg-gradient-to-br from-green-100 to-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg className="w-12 h-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="text-3xl font-bold mb-4 text-green-600">Payment Successful!</h2>
+            <p className="text-gray-700 mb-8 text-lg">
+              Your payment of <span className="font-bold">{invoice ? (parseInt(invoice.amount) / 1e6).toFixed(2) : '0.00'} PYUSD</span> has been processed
             </p>
 
-            <div className="bg-gray-50 rounded-lg p-6 mb-6 text-left">
-              <div className="space-y-2 text-sm">
+            <div className="bg-gradient-to-br from-gray-50 to-blue-50 rounded-2xl p-8 mb-8 text-left border border-gray-200 shadow-sm">
+              <div className="space-y-3">
                 {paymentTxHash && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Transaction Hash:</span>
+                  <div className="flex justify-between items-center pb-3 border-b border-gray-200">
+                    <span className="text-gray-700 font-medium">Transaction Hash</span>
                     <a
                       href={`${getChainById(invoice.chainId)?.explorerUrl}/tx/${paymentTxHash}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-primary-600 hover:text-primary-800 font-mono text-xs"
+                      className="text-blue-600 hover:text-blue-800 font-mono text-xs bg-white px-3 py-1 rounded-lg border border-blue-200 hover:border-blue-300 transition"
                     >
                       {paymentTxHash.slice(0, 10)}...{paymentTxHash.slice(-8)}
                     </a>
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Chain:</span>
-                  <span className="font-medium">{paymentOption.chainName}</span>
+                <div className="flex justify-between py-2">
+                  <span className="text-gray-700 font-medium">Chain</span>
+                  <span className="font-semibold text-gray-900">{paymentOption.chainName}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Gas Paid:</span>
-                  <span className="font-medium text-green-600">
-                    ${paymentOption.gasCostUsd.toFixed(4)} (Sponsored)
+                <div className="flex justify-between py-2 bg-white/60 px-4 rounded-lg">
+                  <span className="text-gray-700 font-medium">Amount Paid</span>
+                  <span className="font-bold text-gray-900">
+                    {(parseInt(invoice.amount) / 1e6).toFixed(2)} PYUSD
                   </span>
                 </div>
-                {paymentOption.needsBridge && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Bridge Cost:</span>
-                    <span className="font-medium">
-                      ${paymentOption.bridgeCostUsd.toFixed(4)}
+                {balanceBeforePayment !== null && (
+                  <div className="flex justify-between py-2">
+                    <span className="text-gray-700 font-medium">Balance Before</span>
+                    <span className="font-semibold text-gray-900">
+                      {(Number(balanceBeforePayment) / 1e6).toFixed(2)} PYUSD
                     </span>
+                  </div>
+                )}
+                {balanceAfterPayment !== null && (
+                  <div className="flex justify-between pt-3 border-t border-gray-200 bg-green-50 -mx-8 px-12 -mb-8 pb-4 rounded-b-2xl">
+                    <span className="text-gray-800 font-bold text-lg">Balance After</span>
+                    <span className="font-bold text-green-600 text-lg">
+                      {(Number(balanceAfterPayment) / 1e6).toFixed(2)} PYUSD
+                    </span>
+                  </div>
+                )}
+                {!balanceAfterPayment && (
+                  <div className="border-t pt-3 mt-2 space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-700 font-medium">Gas Paid</span>
+                      <span className="font-semibold text-green-600">
+                        ${paymentOption.gasCostUsd.toFixed(4)} (Sponsored)
+                      </span>
+                    </div>
+                    {paymentOption.needsBridge && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-700 font-medium">Bridge Cost</span>
+                        <span className="font-semibold text-gray-900">
+                          ${paymentOption.bridgeCostUsd.toFixed(4)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -939,12 +1062,15 @@ export default function CheckoutPage() {
             <div className="flex gap-4 justify-center">
               <a
                 href="/"
-                className="px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition"
+                className="px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 font-semibold transition shadow-lg hover:shadow-xl"
               >
                 Done
               </a>
-              <button className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition">
-                Download Receipt
+              <button className="px-8 py-4 bg-white border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 hover:border-gray-400 font-semibold transition shadow-md hover:shadow-lg flex items-center space-x-2">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span>Download Receipt</span>
               </button>
             </div>
           </div>

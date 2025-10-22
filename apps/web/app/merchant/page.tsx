@@ -22,8 +22,8 @@ export default function MerchantDashboard() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
 
-  // Mock merchant address - in production, get from auth
-  const merchantAddress = '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb';
+  // Test merchant address from setup - in production, get from auth
+  const merchantAddress = '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65';
 
   useEffect(() => {
     fetchInvoices();
@@ -59,16 +59,19 @@ export default function MerchantDashboard() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-10">
         <div>
-          <h1 className="text-3xl font-bold">Merchant Dashboard</h1>
-          <p className="text-gray-600 mt-2">Manage your invoices and view receipts</p>
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">Merchant Dashboard</h1>
+          <p className="text-gray-600 text-lg">Manage your invoices and view receipts</p>
         </div>
         <a
           href="/merchant/invoices/new"
-          className="px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 font-medium transition"
+          className="inline-flex items-center px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 font-semibold transition shadow-lg hover:shadow-xl"
         >
-          + Create Invoice
+          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          Create Invoice
         </a>
       </div>
 
@@ -104,24 +107,35 @@ export default function MerchantDashboard() {
           <div className="pt-7">
             <button
               onClick={exportCSV}
-              className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+              className="inline-flex items-center px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium"
             >
-              📊 Export CSV
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Export CSV
             </button>
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
         {loading ? (
-          <div className="p-8 text-center text-gray-500">Loading invoices...</div>
+          <div className="p-12 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading invoices...</p>
+          </div>
         ) : invoices.length === 0 ? (
-          <div className="p-8 text-center">
-            <div className="text-gray-400 text-5xl mb-4">📄</div>
-            <p className="text-gray-600 mb-4">No invoices found</p>
+          <div className="p-16 text-center">
+            <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <p className="text-gray-700 text-xl font-semibold mb-2">No invoices found</p>
+            <p className="text-gray-500 mb-8">Create your first invoice to start accepting payments</p>
             <a
               href="/merchant/invoices/new"
-              className="inline-block px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+              className="inline-block px-8 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-semibold shadow-lg transition"
             >
               Create Your First Invoice
             </a>
