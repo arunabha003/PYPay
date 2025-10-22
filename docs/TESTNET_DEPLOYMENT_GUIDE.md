@@ -1,24 +1,38 @@
-# Testnet Deployment Guide
+# 🚀 PyPay Testnet Deployment Guide
+
+**Complete step-by-step guide for deploying PyPay to Arbitrum Sepolia and Ethereum Sepolia**
+
+---
+
+## 📋 Table of Contents
+
+1. [Overview](#overview)
+2. [Prerequisites](#prerequisites)
+3. [Environment Setup](#environment-setup)
+4. [Contract Deployment](#contract-deployment)
+5. [System Initialization](#system-initialization)
+6. [Backend Services](#backend-services)
+7. [Testing & Verification](#testing--verification)
+8. [Troubleshooting](#troubleshooting)
+
+---
 
 ## Overview
 
-This guide provides step-by-step instructions for deploying the PYPay system to **real testnets** (Arbitrum Sepolia and Ethereum Sepolia). All code has been tested and is production-ready.
+This guide walks you through deploying the complete PyPay payment system to testnets. PyPay enables:
+- ✅ **Walletless** payments via passkeys
+- ✅ **Gasless** transactions (ERC-4337 paymasters)
+- ✅ **Cross-chain** bridging between Arbitrum & Ethereum
+- ✅ **Multi-merchant** support with invoice management
 
-**Status**: 95% of the system is complete and verified. Only session key enablement was blocked by an Anvil forked mode bug during local testing. On real testnets, everything will work correctly.
+**Deployment Time:** ~30-45 minutes  
+**Cost:** ~0.7 ETH in testnet funds (free from faucets)
 
-## Why Testnet Instead of Local?
-
-During local development, we encountered an **Anvil bug** where forked mode caches bytecode and doesn't invalidate it after proxy upgrades. This caused session key enablement to fail despite the code being correct (all 36 Forge tests pass). Real testnets don't have this issue.
-
-**Evidence the code is correct**:
-- ✅ 36/36 Forge tests passing
-- ✅ Signature generation verified mathematically correct
-- ✅ Even removing ALL validation code still caused the same error (proves it's Anvil, not code)
-- ✅ Transaction traces showed old bytecode being executed despite storage showing new implementation
+---
 
 ## Prerequisites
 
-### 1. Get Testnet ETH
+### Required Tools
 
 **Arbitrum Sepolia:**
 - Faucet: https://faucet.quicknode.com/arbitrum/sepolia

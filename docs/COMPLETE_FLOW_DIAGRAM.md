@@ -493,7 +493,331 @@ Indexer (apps/indexer/src/watchers/)
 
 ---
 
-## 4. Gas Payment Flow Summary
+## 4. Cross-Chain Bridge Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  CROSS-CHAIN PAYMENT SCENARIO                    │
+└─────────────────────────────────────────────────────────────────┘
+
+SCENARIO:
+- User has 5000 PYUSD on Arbitrum Sepolia (Chain 421614)
+- Merchant wants payment on Ethereum Sepolia (Chain 11155111)
+- Invoice amount: 10 PYUSD
+- Bridge cost: $0.0577 USD
+
+USER FLOW:
+
+Frontend (apps/web/app/checkout/[invoiceId]/page.tsx)
+
+1. Fetch Invoice
+   const invoice = {
+     id: "0xabc...",
+     merchant: "0x15d34AAf...",
+     amount: 10000000, // 10 PYUSD (6 decimals)
+     chainId: 11155111, // Ethereum Sepolia
+     expiry: 1749600000
+   }
+
+2. Fetch Payment Options
+   GET /costs/quotes
+   {
+     options: [
+       {
+         chainId: 421614,
+         chainName: "Arbitrum Sepolia",
+         needsBridge: true,
+         sourceChainId: 421614,
+         destChainId: 11155111,
+         gasCostUsd: 0.0577,
+         bridgeCostUsd: 0.0577,
+         totalCostUsd: 0.1154
+       },
+       {
+         chainId: 11155111,
+         chainName: "Ethereum Sepolia",
+         needsBridge: false,
+         gasCostUsd: 0.15,
+         totalCostUsd: 0.15
+       }
+     ]
+   }
+   
+3. User Chooses Cheapest Option
+   Selected: Arbitrum Sepolia with bridge (total $0.1154)
+   
+4. User Confirms Payment
+   "Bridge 10 PYUSD from Arbitrum → Ethereum for $0.0577"
+
+┌─────────────────────────────────────────────────────────────────┐
+│                      BRIDGE INITIATION                           │
+└─────────────────────────────────────────────────────────────────┘
+
+Frontend → Relayer:
+POST /bridge/initiate
+{
+  account: "0xF3f2F0f75175B5ed7f1247c8D1B9FE7D166EE31c",
+  amount: "10000000", // 10 PYUSD
+  sourceChainId: 421614, // Arbitrum
+  destChainId: 11155111, // Ethereum
+  recipient: "0x67bDBAfAa09C5c172D336aAbD1ECe61b6296Ef4f", // User's smart account on dest chain
+  invoiceId: "0xabc...",
+  merchant: "0x15d34AAf..."
+}
+
+Relayer Processing:
+
+1. Validate Request
+   ├─> Check user has sufficient PYUSD on source chain
+   ├─> Check bridge inventory has funds on dest chain
+   ├─> Check bridge cost is acceptable
+   └─> Generate unique bridge ID
+
+2. Create Bridge Lock UserOp (Source Chain - Arbitrum)
+   const lockCallData = encodeFunctionData({
+     abi: BridgeEscrowABI,
+     functionName: "lockForBridge",
+     args: [
+       amount,          // 10000000 (10 PYUSD)
+       destChainId,     // 11155111
+       recipient,       // 0x67bDB... (user's account on Ethereum)
+       bridgeId         // 0xdef... (unique ID)
+     ]
+   })
+   
+   const userOp = {
+     sender: "0xF3f2F0...",  // User's smart account
+     callData: executeCallData(BridgeEscrow, 0, lockCallData),
+     nonce: await getNonce(),
+     accountGasLimits: pack(200000, 100000),
+     preVerificationGas: 21000,
+     gasFees: pack(maxPriorityFee, maxFee),
+     paymasterAndData: "0x",
+     signature: "0x"
+   }
+
+3. Sign UserOp with Session Key
+   const sessionKey = getSessionKey() // From frontend
+   const userOpHash = getUserOpHash(userOp, entryPoint, 421614)
+   const signature = sessionKey.sign(userOpHash)
+   
+   userOp.signature = abi.encode([
+     sessionKey.ecdsaPublicKey, // 64 bytes
+     signature                  // 65 bytes
+   ])
+
+4. Add Paymaster Data
+   const paymasterAndData = await getPaymasterApproval(userOp)
+   userOp.paymasterAndData = paymasterAndData
+
+5. Submit to EntryPoint (Arbitrum)
+   const lockTxHash = await submitUserOp(userOp, 421614)
+   
+   Returns: 0x123abc... (transaction hash)
+
+┌─────────────────────────────────────────────────────────────────┐
+│              LOCK TRANSACTION ON SOURCE CHAIN                    │
+└─────────────────────────────────────────────────────────────────┘
+
+Arbitrum Sepolia Blockchain:
+
+EntryPoint → SmartAccount → BridgeEscrow.lockForBridge()
+
+BridgeEscrow.lockForBridge(
+  uint256 amount,        // 10000000
+  uint256 destChainId,   // 11155111
+  address recipient,     // 0x67bDB...
+  bytes32 bridgeId       // 0xdef...
+) {
+  1. Verify caller is valid smart account
+  2. Verify bridge is not already completed
+  3. Transfer PYUSD from sender to BridgeEscrow:
+     PYUSD.transferFrom(msg.sender, address(this), 10000000)
+  
+  4. Record bridge:
+     bridges[bridgeId] = Bridge({
+       sender: msg.sender,
+       amount: 10000000,
+       sourceChainId: 421614,
+       destChainId: 11155111,
+       recipient: 0x67bDB...,
+       status: BridgeStatus.Locked,
+       timestamp: block.timestamp
+     })
+  
+  5. Emit event:
+     emit BridgeLocked(
+       bridgeId,
+       msg.sender,
+       10000000,
+       destChainId,
+       recipient
+     )
+}
+
+✅ 10 PYUSD now locked in BridgeEscrow on Arbitrum
+
+┌─────────────────────────────────────────────────────────────────┐
+│                RELAYER MONITORS LOCK EVENT                       │
+└─────────────────────────────────────────────────────────────────┘
+
+Indexer Service (apps/indexer/src/watchers/bridgeWatcher.ts):
+
+1. Listen for BridgeLocked event on Arbitrum
+   Event detected: {
+     bridgeId: "0xdef...",
+     sender: "0xF3f2F0...",
+     amount: 10000000,
+     destChainId: 11155111,
+     recipient: "0x67bDB...",
+     blockNumber: 12345,
+     txHash: "0x123abc..."
+   }
+
+2. Store in database
+   INSERT INTO bridges (
+     id, sender, amount, source_chain_id, dest_chain_id,
+     recipient, status, created_at
+   ) VALUES (
+     '0xdef...', '0xF3f2F0...', 10000000, 421614, 11155111,
+     '0x67bDB...', 'LOCKED', NOW()
+   )
+
+3. Notify Relayer
+   POST /bridge/execute-release
+   {
+     bridgeId: "0xdef...",
+     proof: {
+       blockNumber: 12345,
+       txHash: "0x123abc...",
+       logIndex: 0
+     }
+   }
+
+┌─────────────────────────────────────────────────────────────────┐
+│              RELEASE ON DESTINATION CHAIN                        │
+└─────────────────────────────────────────────────────────────────┘
+
+Relayer (apps/relayer/src/bridge/coordinator.ts):
+
+1. Verify Lock Transaction
+   ├─> Fetch transaction from Arbitrum RPC
+   ├─> Verify log exists and matches expected data
+   ├─> Check bridge is not already released
+   └─> Validate recipient address
+
+2. Create Release Transaction (Ethereum Sepolia)
+   const releaseCallData = encodeFunctionData({
+     abi: BridgeEscrowABI,
+     functionName: "releaseForBridge",
+     args: [
+       bridgeId,        // 0xdef...
+       recipient,       // 0x67bDB...
+       amount,          // 10000000
+       sourceChainId,   // 421614
+       lockTxHash       // 0x123abc... (proof)
+     ]
+   })
+
+3. Sign with Relayer Private Key
+   const tx = {
+     to: bridgeEscrowEthereum,
+     data: releaseCallData,
+     gasLimit: 200000,
+     maxFeePerGas: await getGasPrice(),
+     nonce: await relayerNonce(),
+     chainId: 11155111
+   }
+   
+   const signedTx = await relayerWallet.signTransaction(tx)
+
+4. Submit to Ethereum Sepolia
+   const releaseTxHash = await provider.sendTransaction(signedTx)
+   
+   Returns: 0x456def... (release transaction hash)
+
+┌─────────────────────────────────────────────────────────────────┐
+│          RELEASE TRANSACTION ON DESTINATION CHAIN                │
+└─────────────────────────────────────────────────────────────────┘
+
+Ethereum Sepolia Blockchain:
+
+BridgeEscrow.releaseForBridge(
+  bytes32 bridgeId,      // 0xdef...
+  address recipient,     // 0x67bDB...
+  uint256 amount,        // 10000000
+  uint256 sourceChainId, // 421614
+  bytes32 lockTxHash     // 0x123abc...
+) {
+  1. Verify caller is relayer (owner)
+     require(msg.sender == owner, "Unauthorized")
+  
+  2. Verify bridge not already released
+     require(!bridgeReleased[bridgeId], "Already released")
+  
+  3. Mark as released
+     bridgeReleased[bridgeId] = true
+  
+  4. Transfer PYUSD from inventory to recipient
+     PYUSD.transfer(recipient, 10000000)
+  
+  5. Emit event
+     emit BridgeReleased(
+       bridgeId,
+       recipient,
+       10000000,
+       sourceChainId,
+       lockTxHash
+     )
+}
+
+✅ 10 PYUSD released to user's account (0x67bDB...) on Ethereum
+
+┌─────────────────────────────────────────────────────────────────┐
+│                  PAYMENT SETTLEMENT                              │
+└─────────────────────────────────────────────────────────────────┘
+
+Now user has PYUSD on the correct chain (Ethereum), proceed with payment:
+
+Frontend → Relayer:
+POST /payment/submit
+{
+  invoice: {...},
+  userAccount: "0x67bDB...",
+  chainId: 11155111
+}
+
+[Continue with normal payment flow from Section 3]
+
+Final State:
+├─> User's Arbitrum account: 4990 PYUSD (locked 10 for bridge)
+├─> BridgeEscrow Arbitrum: +10 PYUSD (inventory increased)
+├─> BridgeEscrow Ethereum: -10 PYUSD (inventory decreased)
+├─> User's Ethereum account: 10 PYUSD → 0 PYUSD (paid to merchant)
+├─> Merchant: +10 PYUSD ✅
+└─> Total cost to user: 10 PYUSD + $0.0577 bridge fee
+
+TIME BREAKDOWN:
+├─> Lock on Arbitrum: ~15 seconds (1 block confirmation)
+├─> Relayer detection: ~2 seconds (event polling)
+├─> Release on Ethereum: ~15 seconds (1 block confirmation)
+├─> Payment settlement: ~15 seconds (1 block confirmation)
+└─> Total time: ~45-60 seconds for complete cross-chain payment
+
+INVENTORY MANAGEMENT:
+┌─────────────────────────────────────────────────────────────────┐
+│  BridgeEscrow Arbitrum    │    BridgeEscrow Ethereum           │
+│  Before: 1000 PYUSD       │    Before: 1000 PYUSD              │
+│  After:  1010 PYUSD       │    After:  990 PYUSD               │
+│  (net +10)                │    (net -10)                        │
+└─────────────────────────────────────────────────────────────────┘
+
+Relayer needs to periodically rebalance inventory across chains.
+```
+
+---
+
+## 5. Gas Payment Flow Summary
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -549,7 +873,7 @@ PAYMASTER PURPOSE:
 
 ---
 
-## 5. Complete Data Flow (All Fields)
+## 6. Complete Data Flow (All Fields)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -669,7 +993,7 @@ Indexer:
 
 ---
 
-## 6. Key Addresses & Their Roles
+## 7. Key Addresses & Their Roles
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -735,7 +1059,7 @@ Session Key: 0xc908625ced01d678d1f12c95d2442425384a0e1c... (64 bytes)
 
 ---
 
-## 7. Why Paymaster Doesn't Hold ETH Directly
+## 8. Why Paymaster Doesn't Hold ETH Directly
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
