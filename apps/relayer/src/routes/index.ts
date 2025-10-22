@@ -607,9 +607,12 @@ export function registerRoutes(
       
       let userOpHash: string;
 
-      if (isLocalhost) {
-        // LOCAL MODE: Direct EntryPoint call (for anvil testing)
-        app.log.info('Using direct EntryPoint execution (localhost mode)');
+      // ALWAYS use direct bundling (no Pimlico required)
+      const useDirectBundling = true;
+
+      if (useDirectBundling) {
+        // DIRECT BUNDLING MODE: Call EntryPoint.handleOps directly
+        app.log.info('Using direct EntryPoint execution (direct bundling mode)');
 
         const guardianAccount = privateKeyToAccount(GUARDIAN_PRIVATE_KEY);
         const walletClient = createWalletClient({
