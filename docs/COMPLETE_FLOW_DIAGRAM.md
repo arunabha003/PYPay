@@ -17,7 +17,8 @@ Step 1: Deploy Contracts
 ├─> Paymaster
 ├─> Checkout
 ├─> PYUSD Token
-└─> MerchantRegistry
+├─> MerchantRegistry
+└─> BridgeEscrow
 
 Step 2: Create Smart Account
 AccountFactory.createAccount(
@@ -44,9 +45,26 @@ EntryPoint Accounting for Paymaster:
 ├─> deposits[0x9a81...] = 2 ETH      ← Used for gas payments
 └─> stakes[0x9a81...] = 1 ETH        ← Locked for reputation
 
-Step 4: Fund Smart Account
+Step 4: Register Merchant
+MerchantRegistry.registerMerchant(
+  merchant: 0x99d4... (merchant wallet address),
+  payout: 0x99d4... (same address for payout),
+  feeBps: 100 (1% fee)
+)
+  └─> Stores merchant in registry:
+      merchants[0x99d4...] = {
+        active: true,
+        payout: 0x99d4...,
+        feeBps: 100
+      }
+
+Step 5: Fund Smart Account
 ├─> Send 1 ETH to 0xdd0A... (for direct txs if needed)
 └─> Mint 5000 PYUSD to 0xdd0A...
+
+Step 6: Fund Bridge Inventory
+├─> Mint 1000 PYUSD to BridgeEscrow on Arbitrum Sepolia
+└─> Mint 1000 PYUSD to BridgeEscrow on Ethereum Sepolia
 ```
 
 ---
@@ -186,7 +204,83 @@ TapKitAccount.enableSessionKey(
 
 ---
 
-## 3. Payment Flow (Session Key in Action)
+## 3. Merchant Invoice Creation Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  MERCHANT CREATES INVOICE                        │
+└─────────────────────────────────────────────────────────────────┘
+
+Merchant Action: Connect wallet and create invoice
+  │
+  ▼
+Frontend (apps/web/app/merchant/invoices/new/page.tsx)
+
+1. Connect Wallet (MetaMask/WalletConnect)
+   const { address } = useAccount() // wagmi hook
+   Returns: 0x99d4... (merchant wallet address)
+
+2. Check Merchant Registration
+   GET /api/merchant/status?address=0x99d4...
+   
+   Backend queries MerchantRegistry:
+   ├─> isActive(0x99d4...) → true/false
+   ├─> payoutOf(0x99d4...) → payout address
+   └─> feeOf(0x99d4...) → fee in basis points
+
+   If not registered:
+   └─> Show "Contact admin to register" message
+
+3. Fetch Real-Time Gas Costs
+   GET /costs/quotes
+   {
+     chains: [
+       {
+         chainId: 421614,
+         name: "Arbitrum Sepolia",
+         gasCostUsd: 0.0001
+       },
+       {
+         chainId: 11155111,
+         name: "Ethereum Sepolia", 
+         gasCostUsd: 0.05
+       }
+     ]
+   }
+
+4. Create Invoice
+   const invoiceData = {
+     merchant: address, // Dynamic from connected wallet
+     amount: 100000000, // 100 PYUSD (6 decimals)
+     chainId: 421614, // Merchant's preferred chain
+     expiry: Date.now() + 3600000, // 1 hour
+     memo: "Order #12345"
+   }
+   
+   POST /api/invoice/create
+   {
+     ...invoiceData,
+     signature: await signInvoice(invoiceData) // Merchant signs
+   }
+
+5. Backend Stores Invoice
+   INSERT INTO invoices (
+     id, merchant, amount, chain_id, expiry, memo, status
+   ) VALUES (
+     '0xabc...', '0x99d4...', 100000000, 421614, 1749600000, 
+     'Order #12345', 'PENDING'
+   )
+
+6. Generate Payment Link
+   const paymentLink = `https://pypay.app/checkout/${invoiceId}`
+   
+   └─> Merchant shares link with customer
+
+✅ Invoice Created!
+
+---
+
+## 4. Payment Flow (Session Key in Action)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -382,7 +476,10 @@ For each UserOp:
    │     InvoiceTuple invoice = decode(innerCallData[4:])
    │
    ├─> Verify merchant is active:
-   │     bool isActive = MerchantRegistry.isMerchantActive(invoice.merchant)
+   │     (bool success, bytes memory data) = merchantRegistry.staticcall(
+   │       abi.encodeWithSignature("isActive(address)", invoice.merchant)
+   │     )
+   │     bool isActive = abi.decode(data, (bool))
    │     require(isActive, "Inactive merchant")
    │
    ├─> Verify invoice not already paid:
@@ -493,7 +590,7 @@ Indexer (apps/indexer/src/watchers/)
 
 ---
 
-## 4. Cross-Chain Bridge Flow
+## 5. Cross-Chain Bridge Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -817,7 +914,7 @@ Relayer needs to periodically rebalance inventory across chains.
 
 ---
 
-## 5. Gas Payment Flow Summary
+## 6. Gas Payment Flow Summary
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -873,7 +970,7 @@ PAYMASTER PURPOSE:
 
 ---
 
-## 6. Complete Data Flow (All Fields)
+## 7. Complete Data Flow (All Fields)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -993,7 +1090,7 @@ Indexer:
 
 ---
 
-## 7. Key Addresses & Their Roles
+## 8. Key Addresses & Their Roles
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -1043,6 +1140,31 @@ Checkout: 0xf588f57BE135813d305815Dc3E71960c97987b19
 │   └─> isInvoicePaid(id) - Check payment status
 └─> Called by: Smart Account via EntryPoint
 
+MerchantRegistry (Arbitrum): 0xb65901d4d41d6389827b2c23d6c92b29991865d9
+MerchantRegistry (Ethereum): 0xa47749699925e9187906f5a0361d5073397279b3
+├─> Role: Registry of verified merchants
+├─> Storage:
+│   └─> merchants[address] = {active, payout, feeBps}
+├─> Functions:
+│   ├─> isActive(merchant) - Check if merchant is registered and active
+│   ├─> payoutOf(merchant) - Get merchant's payout address
+│   ├─> feeOf(merchant) - Get merchant's fee in basis points
+│   ├─> getMerchant(merchant) - Get full merchant config
+│   ├─> registerMerchant(merchant, payout, feeBps) - Register new merchant (owner only)
+│   └─> setActive(merchant, active) - Enable/disable merchant (owner only)
+└─> Called by: Paymaster (isActive), Checkout (payoutOf), Owner (register/admin)
+
+BridgeEscrow (Arbitrum): 0xC531d4D522bb9dAfCcDED9d155C09502Cf0385b6
+BridgeEscrow (Ethereum): 0xC531d4D522bb9dAfCcDED9d155C09502Cf0385b6
+├─> Role: Manages cross-chain PYUSD transfers
+├─> Holds: 1000 PYUSD inventory on each chain
+├─> Owner: Relayer (0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266)
+├─> Functions:
+│   ├─> lockForBridge(amount, destChain, recipient, bridgeId) - Lock tokens on source
+│   ├─> releaseForBridge(bridgeId, recipient, amount, sourceChain, proof) - Release on dest
+│   └─> withdraw(token, amount) - Owner emergency withdrawal
+└─> Called by: User accounts (lock), Relayer (release)
+
 Guardian: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
 ├─> Role: Trusted recovery agent
 ├─> Holds: 100 ETH (for gas when enabling session keys)
@@ -1059,7 +1181,7 @@ Session Key: 0xc908625ced01d678d1f12c95d2442425384a0e1c... (64 bytes)
 
 ---
 
-## 8. Why Paymaster Doesn't Hold ETH Directly
+## 9. Why Paymaster Doesn't Hold ETH Directly
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -1120,4 +1242,96 @@ When customer pays:
 - Enables gasless UX for end users
 
 **Complete flow:** User signs → Relayer bundles → EntryPoint validates → Paymaster approves → EntryPoint executes → Paymaster pays (via deposit) → Relayer reimbursed
+
+---
+
+## 10. Querying Merchant Registry
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              MERCHANT REGISTRY QUERIES                           │
+└─────────────────────────────────────────────────────────────────┘
+
+Using Cast (Foundry CLI):
+
+# Set environment variables
+export MERCHANT_REGISTRY_ARBSEPOLIA=0xb65901d4d41d6389827b2c23d6c92b29991865d9
+export MERCHANT_REGISTRY_ETHSEPOLIA=0xa47749699925e9187906f5a0361d5073397279b3
+export TEST_MERCHANT=0x99d44c22fbff9fb4c8bd69378b860b6d9ce3f3b7
+
+# Check if merchant is active (Arbitrum Sepolia)
+cast call $MERCHANT_REGISTRY_ARBSEPOLIA \
+  "isActive(address)(bool)" \
+  $TEST_MERCHANT \
+  --rpc-url $ARBITRUM_SEPOLIA_RPC
+
+# Output: true
+
+# Get merchant payout address
+cast call $MERCHANT_REGISTRY_ARBSEPOLIA \
+  "payoutOf(address)(address)" \
+  $TEST_MERCHANT \
+  --rpc-url $ARBITRUM_SEPOLIA_RPC
+
+# Output: 0x99d44c22fbff9fb4c8bd69378b860b6d9ce3f3b7
+
+# Get merchant fee (basis points, 100 = 1%)
+cast call $MERCHANT_REGISTRY_ARBSEPOLIA \
+  "feeOf(address)(uint16)" \
+  $TEST_MERCHANT \
+  --rpc-url $ARBITRUM_SEPOLIA_RPC
+
+# Output: 100 (1%)
+
+# Get full merchant configuration
+cast call $MERCHANT_REGISTRY_ARBSEPOLIA \
+  "getMerchant(address)((bool,address,uint16))" \
+  $TEST_MERCHANT \
+  --rpc-url $ARBITRUM_SEPOLIA_RPC
+
+# Output: (true, 0x99d44c22fbff9fb4c8bd69378b860b6d9ce3f3b7, 100)
+
+─────────────────────────────────────────────────────────────────
+
+REGISTER NEW MERCHANT (Owner Only):
+
+cast send $MERCHANT_REGISTRY_ARBSEPOLIA \
+  "registerMerchant(address,address,uint16)" \
+  0x1234... \              # Merchant wallet address
+  0x1234... \              # Payout address (can be same)
+  100 \                    # Fee (100 = 1%, 1000 = 10% max)
+  --rpc-url $ARBITRUM_SEPOLIA_RPC \
+  --private-key $DEPLOYER_PRIVATE_KEY
+
+# Emits: MerchantRegistered(merchant, payout, feeBps)
+#        MerchantStatus(merchant, true)
+
+─────────────────────────────────────────────────────────────────
+
+DISABLE MERCHANT (Owner Only):
+
+cast send $MERCHANT_REGISTRY_ARBSEPOLIA \
+  "setActive(address,bool)" \
+  $TEST_MERCHANT \
+  false \
+  --rpc-url $ARBITRUM_SEPOLIA_RPC \
+  --private-key $DEPLOYER_PRIVATE_KEY
+
+# Emits: MerchantStatus(merchant, false)
+# Effect: Paymaster will reject UserOps for this merchant's invoices
+
+─────────────────────────────────────────────────────────────────
+
+UPDATE MERCHANT CONFIG (Owner Only):
+
+cast send $MERCHANT_REGISTRY_ARBSEPOLIA \
+  "updateMerchant(address,address,uint16)" \
+  $TEST_MERCHANT \
+  0x5678... \              # New payout address
+  200 \                    # New fee (2%)
+  --rpc-url $ARBITRUM_SEPOLIA_RPC \
+  --private-key $DEPLOYER_PRIVATE_KEY
+
+# Emits: MerchantUpdated(merchant, payout, feeBps)
+```
 
