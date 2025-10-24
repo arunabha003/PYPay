@@ -50,7 +50,7 @@ export default function RootLayout({
                 PyPay
               </span>
             </div>
-            <p className="text-gray-600 text-sm">Walletless, Gasless PYUSD Checkout</p>
+            <p className="text-gray-600 text-sm">Walletless, Gasless PYUSD Checkout </p>
             <p className="text-gray-500 text-xs mt-2">Built with ERC-4337, WebAuthn & Multi-Chain Routing</p>
           </div>
         </footer>

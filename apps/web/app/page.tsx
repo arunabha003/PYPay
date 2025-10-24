@@ -12,10 +12,9 @@ export default function HomePage() {
           </h1>
         </div>
         <p className="text-2xl text-gray-600 mb-4 font-light">
-          Walletless, Gasless PYUSD Checkout
+          Walletless, Gasless PYUSD Checkout Powered by ERC-4337
         </p>
         <p className="text-lg text-gray-500 max-w-2xl mx-auto">
-          Accept crypto payments without the complexity. No wallets, no gas fees, just seamless transactions.
         </p>
       </div>
       
@@ -95,7 +94,7 @@ export default function HomePage() {
             </div>
             <h4 className="font-bold text-xl mb-3 text-gray-900">Multi-Chain</h4>
             <p className="text-gray-600 leading-relaxed">
-              Automatically routes to the cheapest network with instant cross-chain bridging.
+              Instant cross-chain bridging to ensure seamless transactions.
             </p>
           </div>
         </div>
