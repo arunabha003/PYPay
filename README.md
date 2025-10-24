@@ -21,10 +21,11 @@ Off‑chain: relayer, indexer, cost‑engine.
 
 ## Documentation
 
-- **[Technical Flow](docs/TECHNICAL_FLOW.md)** - Complete payment flow with visual diagram
 - **[Technical Reference](docs/TECHNICAL_REFERENCE.md)** - Architecture and implementation details
-- **[Testnet Deployment](docs/TESTNET_DEPLOYMENT_GUIDE.md)** - Step-by-step deployment guide
+- **[Technical Flow](docs/TECHNICAL_FLOW.md)** - Complete payment flow with visual diagram
 - **[Local Testing Guide](docs/LOCAL_TESTING_GUIDE.md)** - How to test the system locally
+- **[Testnet Deployment Guide](docs/TESTNET_DEPLOYMENT_GUIDE.md)** - Step-by-step deployment guide
+
 
 ## Live testnet addresses
 
