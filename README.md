@@ -1,6 +1,6 @@
 # PyPay - Passwordless Cross-Chain PYUSD Payments
 
-PyPay is a production-ready payment gateway that enables merchants to accept PYUSD (PayPal USD) with zero user friction. Customers pay with Face ID/Touch ID passkeys, while merchants connect their existing wallets. The system automatically handles cross-chain bridging, gas sponsorship, and payment settlement.
+A walletless, gasless checkout: buyers tap or scan an NFC/QR invoice, confirm with a passkey (WebAuthn), and pay a registered merchant in PYUSD on the cheapest available network. An ERC‑4337 paymaster sponsors gas; ephemeral session keys reduce repeated prompts. If the buyer’s funds live on another chain, the app can automatically re-route and bridge the payment as needed.
 
 ![PyPay Architecture](docs/technical_diagram.png)
 
@@ -26,6 +26,31 @@ Off‑chain: relayer, indexer, cost‑engine.
 - **[Testnet Deployment](docs/TESTNET_DEPLOYMENT_GUIDE.md)** - Step-by-step deployment guide
 - **[Local Testing Guide](docs/LOCAL_TESTING_GUIDE.md)** - How to test the system locally
 
+## Live testnet addresses
+
+### Arbitrum Sepolia (Arbiscan)
+
+- REGISTRY: [0xB65901d4D41D6389827B2c23d6C92b29991865D9](https://sepolia.arbiscan.io/address/0xB65901d4D41D6389827B2c23d6C92b29991865D9)
+- INVOICE: [0x7c3ACA4B28be70C15bb4C3A8a93CE7dF64713ED0](https://sepolia.arbiscan.io/address/0x7c3ACA4B28be70C15bb4C3A8a93CE7dF64713ED0)
+- CHECKOUT: [0x96AD79AB348336cFA881C9e0E582d25968799485](https://sepolia.arbiscan.io/address/0x96AD79AB348336cFA881C9e0E582d25968799485)
+- PAYMASTER: [0xC54bBF5A6FC2D72A25985eba2eb385b3340c29a6](https://sepolia.arbiscan.io/address/0xC54bBF5A6FC2D72A25985eba2eb385b3340c29a6)
+- BRIDGE_ESCROW: [0xC531d4D522Bb9DAFcCdED9d155C09502Cf0385B6](https://sepolia.arbiscan.io/address/0xC531d4D522Bb9DAFcCdED9d155C09502Cf0385B6)
+- ACCOUNT_FACTORY: [0x19da58bD831E2A54De8716aCa2B1bb27dA450cB9](https://sepolia.arbiscan.io/address/0x19da58bD831E2A54De8716aCa2B1bb27dA450cB9)
+- PYUSD: [0x637A1259C6afd7E3AdF63993cA7E58BB438aB1B1](https://sepolia.arbiscan.io/address/0x637A1259C6afd7E3AdF63993cA7E58BB438aB1B1)
+- SMART_ACCOUNT: [0xc5603937d2056a05A7E71D39f2E58cEf18C3271a](https://sepolia.arbiscan.io/address/0xc5603937d2056a05A7E71D39f2E58cEf18C3271a)
+
+### Ethereum Sepolia (Etherscan)
+
+- REGISTRY: [0xa47749699925e9187906f5a0361d5073397279b3](https://sepolia.etherscan.io/address/0xa47749699925e9187906f5a0361d5073397279b3)
+- INVOICE: [0x48935538CEbdb57b7B75D2476DC6C9b3A1cceDD6](https://sepolia.etherscan.io/address/0x48935538CEbdb57b7B75D2476DC6C9b3A1cceDD6)
+- CHECKOUT: [0xF57690CD5f91257E76C9f636de9B1243c4a0fD8e](https://sepolia.etherscan.io/address/0xF57690CD5f91257E76C9f636de9B1243c4a0fD8e)
+- PAYMASTER: [0xe6257bd26941cB6C3B977Fe2b2859aE7180396a4](https://sepolia.etherscan.io/address/0xe6257bd26941cB6C3B977Fe2b2859aE7180396a4)
+- BRIDGE_ESCROW: [0xfE5D99899A40C9bF4189bebFF7bd23CB2d7eFDE9](https://sepolia.etherscan.io/address/0xfE5D99899A40C9bF4189bebFF7bd23CB2d7eFDE9)
+- ACCOUNT_FACTORY: [0x15FfbD328C9A0280027E04503A3F15b6bdea91e5](https://sepolia.etherscan.io/address/0x15FfbD328C9A0280027E04503A3F15b6bdea91e5)
+- PYUSD: [0xCaC524BcA292aaade2DF8A05cC58F0a65B1B3bB9](https://sepolia.etherscan.io/address/0xCaC524BcA292aaade2DF8A05cC58F0a65B1B3bB9)
+- SMART_ACCOUNT: [0xe2c55e352C5AfE9acF2AEbF9f48d631672658002](https://sepolia.etherscan.io/address/0xe2c55e352C5AfE9acF2AEbF9f48d631672658002)
+
+
 ## Quick Start
 
 ### Prerequisites
@@ -36,10 +61,12 @@ Off‑chain: relayer, indexer, cost‑engine.
 
 ### Setup
 ```bash
-git clone <repository-url>
+git clone https://github.com/arunabha003/PYPay.git
 cd PYPay
 pnpm install
 cp env.example .env
+cd apps/web
+cp env.local.example .env.local
 # Configure your environment variables
 ```
 
